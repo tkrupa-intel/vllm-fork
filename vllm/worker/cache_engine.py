@@ -41,7 +41,8 @@ class CacheEngine:
         self.num_cpu_blocks = cache_config.num_cpu_blocks
 
         # Initialize the cache.
-        self.gpu_cache = self.allocate_gpu_cache()
+        # self.gpu_cache = self.allocate_gpu_cache()
+        self.gpu_cache = self.allocate_hpu_cache()
         self.cpu_cache = self.allocate_cpu_cache()
 
         # Initialize the stream for caching operations.
@@ -66,6 +67,29 @@ class CacheEngine:
             self.head_size,
             self.block_size,
         )
+
+    def allocate_hpu_cache(self) -> List[KVCache]:
+        hpu_cache: List[KVCache] = []
+        kv_block_shape = (
+            self.num_heads,
+            self.head_size,
+            self.block_size)
+        for _ in range(self.num_layers):
+            key_blocks = []
+            value_blocks = []
+            for _ in range(self.num_gpu_blocks):
+                key_blocks.append(torch.empty(
+                    size=kv_block_shape,
+                    dtype=self.dtype,
+                    device="hpu",
+                ))
+                value_blocks.append(torch.empty(
+                    size=kv_block_shape,
+                    dtype=self.dtype,
+                    device="hpu",
+                ))
+            hpu_cache.append((key_blocks, value_blocks))
+        return hpu_cache
 
     def allocate_gpu_cache(self) -> List[KVCache]:
         gpu_cache: List[KVCache] = []
