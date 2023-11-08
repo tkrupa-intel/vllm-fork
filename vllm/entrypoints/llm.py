@@ -9,6 +9,8 @@ from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
 
+import torch
+import habana_frameworks.torch as htorch
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -174,20 +176,41 @@ class LLM:
         self.llm_engine.add_request(request_id, prompt, sampling_params,
                                     prompt_token_ids)
 
-    def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
+    def _run_engine(self, use_tqdm: bool, profiling: bool = False) -> List[RequestOutput]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
             pbar = tqdm(total=num_requests, desc="Processed prompts")
+        if profiling:
+            prof = torch.profiler.profile(
+                schedule = torch.profiler.schedule(wait=0, warmup=0, active=4, repeat=1),
+                activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU],
+                with_stack = True,
+                record_shapes = False,
+                on_trace_ready = torch.profiler.tensorboard_trace_handler("./", use_gzip = True)
+            )
+            prof.start()
+            count = 0
+
         # Run the engine.
         outputs: List[RequestOutput] = []
         while self.llm_engine.has_unfinished_requests():
             step_outputs = self.llm_engine.step()
+            if profiling:
+                count += 1
+                if count == 4:
+                    break
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
                     if use_tqdm:
                         pbar.update(1)
+            if profiling:
+                htorch.core.mark_step()
+                htorch.hpu.synchronize()
+                prof.step()
+        if profiling:
+            prof.stop()
         if use_tqdm:
             pbar.close()
         # Sort the outputs by request ID.

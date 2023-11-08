@@ -35,11 +35,16 @@ def sample_requests(
     completions = [completion for _, completion in dataset]
     completion_token_ids = tokenizer(completions).input_ids
     tokenized_dataset = []
+    count = 0
     for i in range(len(dataset)):
+        count += 1
+        i = i % 10
         output_len = len(completion_token_ids[i])
         if fixed_output_len is not None:
             output_len = fixed_output_len
         tokenized_dataset.append((prompts[i], prompt_token_ids[i], output_len))
+        if count == num_requests:
+            break
 
     # Filter out too long sequences.
     filtered_dataset: List[Tuple[str, int, int]] = []
@@ -53,9 +58,10 @@ def sample_requests(
             continue
         filtered_dataset.append((prompt, prompt_len, output_len))
 
-    # Sample the requests.
-    sampled_requests = random.sample(filtered_dataset, num_requests)
-    return sampled_requests
+    # # Sample the requests.
+    # sampled_requests = random.sample(filtered_dataset, num_requests)
+    # return sampled_requests
+    return filtered_dataset
 
 
 def run_vllm(
@@ -71,6 +77,7 @@ def run_vllm(
     dtype: str,
     max_model_len: Optional[int],
     enforce_eager: bool,
+    profiling: bool = False, # For Gaudi2
 ) -> float:
     from vllm import LLM, SamplingParams
     llm = LLM(
@@ -83,6 +90,10 @@ def run_vllm(
         dtype=dtype,
         max_model_len=max_model_len,
         enforce_eager=enforce_eager,
+        max_num_batched_tokens=(16 * 512),
+        max_num_seqs=256,
+        max_paddings=(16 * 512),
+        block_size=16,
     )
 
     # Add the requests to the engine.
@@ -104,7 +115,7 @@ def run_vllm(
 
     start = time.perf_counter()
     # FIXME(woosuk): Do not use internal method.
-    llm._run_engine(use_tqdm=True)
+    llm._run_engine(use_tqdm=True, profiling=profiling)
     end = time.perf_counter()
     return end - start
 
@@ -206,7 +217,8 @@ def main(args: argparse.Namespace):
                                 args.quantization, args.tensor_parallel_size,
                                 args.seed, args.n, args.use_beam_search,
                                 args.trust_remote_code, args.dtype,
-                                args.max_model_len, args.enforce_eager)
+                                args.max_model_len, args.enforce_eager,
+                                args.profiling)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
         elapsed_time = run_hf(requests, args.model, tokenizer, args.n,
@@ -284,6 +296,7 @@ if __name__ == "__main__":
     parser.add_argument("--enforce-eager",
                         action="store_true",
                         help="enforce eager execution")
+    parser.add_argument("--profiling", action='store_true', help='Profiling first 4 steps')
     args = parser.parse_args()
     if args.tokenizer is None:
         args.tokenizer = args.model

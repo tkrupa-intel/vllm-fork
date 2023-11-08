@@ -28,10 +28,10 @@ def _is_cuda() -> bool:
     return torch.version.cuda is not None
 
 
-# Compiler flags.
-CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
-# TODO(woosuk): Should we use -O3?
-NVCC_FLAGS = ["-O2", "-std=c++17"]
+# # Compiler flags.
+# CXX_FLAGS = ["-g", "-O2", "-std=c++17"]
+# # TODO(woosuk): Should we use -O3?
+# NVCC_FLAGS = ["-O2", "-std=c++17"]
 
 if _is_hip():
     if ROCM_HOME is None:
@@ -210,32 +210,33 @@ elif _is_hip():
             f"Only the following arch is supported: {ROCM_SUPPORTED_ARCHS}"
             f"amdgpu_arch_found: {amd_arch}")
 
-ext_modules = []
+# ext_modules = []
 
-vllm_extension_sources = [
-    "csrc/cache_kernels.cu",
-    "csrc/attention/attention_kernels.cu",
-    "csrc/pos_encoding_kernels.cu",
-    "csrc/activation_kernels.cu",
-    "csrc/layernorm_kernels.cu",
-    "csrc/quantization/squeezellm/quant_cuda_kernel.cu",
-    "csrc/cuda_utils_kernels.cu",
-    "csrc/pybind.cpp",
-]
+if _is_cuda() or _is_hip():
+    vllm_extension_sources = [
+        "csrc/cache_kernels.cu",
+        "csrc/attention/attention_kernels.cu",
+        "csrc/pos_encoding_kernels.cu",
+        "csrc/activation_kernels.cu",
+        "csrc/layernorm_kernels.cu",
+        "csrc/quantization/squeezellm/quant_cuda_kernel.cu",
+        "csrc/cuda_utils_kernels.cu",
+        "csrc/pybind.cpp",
+    ]
 
-if _is_cuda():
-    vllm_extension_sources.append("csrc/quantization/awq/gemm_kernels.cu")
-    vllm_extension_sources.append("csrc/quantization/gptq/q_gemm.cu")
+    if _is_cuda():
+        vllm_extension_sources.append("csrc/quantization/awq/gemm_kernels.cu")
+        vllm_extension_sources.append("csrc/quantization/gptq/q_gemm.cu")
 
-vllm_extension = CUDAExtension(
-    name="vllm._C",
-    sources=vllm_extension_sources,
-    extra_compile_args={
-        "cxx": CXX_FLAGS,
-        "nvcc": NVCC_FLAGS,
-    },
-)
-ext_modules.append(vllm_extension)
+    vllm_extension = CUDAExtension(
+        name="vllm._C",
+        sources=vllm_extension_sources,
+        extra_compile_args={
+            "cxx": CXX_FLAGS,
+            "nvcc": NVCC_FLAGS,
+        },
+    )
+    ext_modules.append(vllm_extension)
 
 
 def get_path(*filepath) -> str:
@@ -274,12 +275,8 @@ def get_vllm_version() -> str:
 
 
 def read_readme() -> str:
-    """Read the README file if present."""
-    p = get_path("README.md")
-    if os.path.isfile(p):
-        return io.open(get_path("README.md"), "r", encoding="utf-8").read()
-    else:
-        return ""
+    """Read the README file."""
+    return io.open(get_path("README.md"), "r", encoding="utf-8").read()
 
 
 def get_requirements() -> List[str]:
@@ -319,7 +316,6 @@ setuptools.setup(
                                                "examples", "tests")),
     python_requires=">=3.8",
     install_requires=get_requirements(),
-    ext_modules=ext_modules,
-    cmdclass={"build_ext": BuildExtension},
-    package_data={"vllm": ["py.typed"]},
+    # ext_modules=ext_modules,
+    # cmdclass={"build_ext": BuildExtension},
 )
