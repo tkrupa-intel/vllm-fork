@@ -255,8 +255,6 @@ class Worker:
         if self.block_size is not None:
             if max_seq_len != 1:
                 max_seq_len = round_up(max_seq_len, self.block_size)
-            if max_num_blocks_per_seq != 0:
-                max_num_blocks_per_seq = round_up(max_num_blocks_per_seq, self.block_size)
 
         padded_input_tokens = [
             _pad_to_max(tokens, max_seq_len, pad=0) for tokens in input_tokens
