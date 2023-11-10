@@ -217,7 +217,7 @@ class LLMEngine:
         # Since we use a shared centralized controller, we take the minimum
         # number of blocks across all workers to make sure all the memory
         # operators can be applied to all workers.
-        num_gpu_blocks = min(b[0] for b in num_blocks)
+        num_gpu_blocks = min(10500, min(b[0] for b in num_blocks))
         num_cpu_blocks = min(b[1] for b in num_blocks)
         # FIXME(woosuk): Change to debug log.
         logger.info(f"# GPU blocks: {num_gpu_blocks}, "
@@ -425,7 +425,7 @@ class LLMEngine:
             child_seqs.append((parent, parent))
 
         for seq, _ in child_seqs:
-            self._decode_sequence(seq, seq_group.sampling_params)
+            # self._decode_sequence(seq, seq_group.sampling_params)
             self._check_stop(seq, seq_group.sampling_params)
 
         # Non-beam search case
