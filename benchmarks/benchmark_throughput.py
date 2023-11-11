@@ -38,7 +38,7 @@ def sample_requests(
     count = 0
     for i in range(len(dataset)):
         count += 1
-        i = i % 10
+        i = i % 4
         output_len = len(completion_token_ids[i])
         if fixed_output_len is not None:
             output_len = fixed_output_len
@@ -90,10 +90,10 @@ def run_vllm(
         dtype=dtype,
         max_model_len=max_model_len,
         enforce_eager=enforce_eager,
-        max_num_batched_tokens=(16 * 512),
-        max_num_seqs=256,
-        max_paddings=(16 * 512),
-        block_size=16,
+        max_num_batched_tokens=(16 * 128),
+        max_num_seqs=20,
+        max_paddings=(16 * 128),
+        block_size=32,
     )
 
     # Add the requests to the engine.
