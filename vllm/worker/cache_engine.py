@@ -77,17 +77,16 @@ class CacheEngine:
         for _ in range(self.num_layers):
             key_blocks = []
             value_blocks = []
-            for _ in range(self.num_gpu_blocks):
-                key_blocks.append(torch.empty(
-                    size=kv_block_shape,
-                    dtype=self.dtype,
-                    device="hpu",
-                ))
-                value_blocks.append(torch.empty(
-                    size=kv_block_shape,
-                    dtype=self.dtype,
-                    device="hpu",
-                ))
+            key_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *kv_block_shape),
+                dtype=self.dtype,
+                device="hpu",
+            )
+            value_blocks = torch.empty(
+                size=(self.num_gpu_blocks, *kv_block_shape),
+                dtype=self.dtype,
+                device="hpu",
+            )
             hpu_cache.append((key_blocks, value_blocks))
         return hpu_cache
 
