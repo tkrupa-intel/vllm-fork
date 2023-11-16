@@ -314,16 +314,15 @@ class Worker:
         )
 
         # Create attention mask
-        attn_masks = [
-            torch.zeros((len(input_tokens), self.block_size), dtype=torch.int64) for _ in range(max_num_blocks_per_seq)]
-        for i in range(0, max_num_blocks_per_seq):
-            for seq_id in range(len(input_tokens)):
-                if (i * self.block_size) < context_lens[seq_id] and (i + 1) * self.block_size > context_lens[seq_id]:
-                    attn_masks[i][seq_id, :context_lens[seq_id] % self.block_size] = 1
-                elif (i+1) * self.block_size <= context_lens[seq_id]:
-                    attn_masks[i][seq_id, :] = 1
-            attn_masks[i] = attn_masks[i].to(device="cuda", non_blocking=True)
-        input_metadata.attention_masks = attn_masks
+        if max_num_blocks_per_seq != 0:
+            attn_masks = torch.zeros((max_num_blocks_per_seq, len(input_tokens), self.block_size), dtype=torch.int64)
+            for i in range(0, max_num_blocks_per_seq):
+                for seq_id in range(len(input_tokens)):
+                    if (i * self.block_size) < context_lens[seq_id] and (i + 1) * self.block_size > context_lens[seq_id]:
+                        attn_masks[i][seq_id, :context_lens[seq_id] % self.block_size] = 1
+                    elif (i + 1) * self.block_size <= context_lens[seq_id]:
+                        attn_masks[i][seq_id, :] = 1
+            input_metadata.attention_masks = attn_masks.to(device="cuda")
         print("input token shape: ", tokens_tensor.shape)
         return tokens_tensor, positions_tensor, input_metadata
 
