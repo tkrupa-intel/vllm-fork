@@ -323,6 +323,8 @@ class Worker:
                     elif (i + 1) * self.block_size <= context_lens[seq_id]:
                         attn_masks[i][seq_id, :] = 1
             input_metadata.attention_masks = attn_masks.to(device="cuda")
+        # import pdb
+        # pdb.set_trace()
         print("input token shape: ", tokens_tensor.shape)
         return tokens_tensor, positions_tensor, input_metadata
 
