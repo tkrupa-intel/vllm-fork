@@ -183,7 +183,7 @@ class LLM:
             pbar = tqdm(total=num_requests, desc="Processed prompts")
         if profiling:
             prof = torch.profiler.profile(
-                schedule = torch.profiler.schedule(wait=0, warmup=0, active=4, repeat=1),
+                schedule = torch.profiler.schedule(wait=6, warmup=0, active=2, repeat=1),
                 activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU],
                 with_stack = True,
                 record_shapes = False,
@@ -196,9 +196,11 @@ class LLM:
         outputs: List[RequestOutput] = []
         while self.llm_engine.has_unfinished_requests():
             step_outputs = self.llm_engine.step()
+            print("vLLM completed a step")
             if profiling:
                 count += 1
-                if count == 4:
+                print(f"Processing step {count}")
+                if count == 8:
                     break
             for output in step_outputs:
                 if output.finished:
@@ -207,9 +209,9 @@ class LLM:
                         pbar.update(1)
             if profiling:
                 htorch.core.mark_step()
-                htorch.hpu.synchronize()
                 prof.step()
         if profiling:
+            htorch.hpu.synchronize()
             prof.stop()
         if use_tqdm:
             pbar.close()
