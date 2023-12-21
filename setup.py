@@ -212,21 +212,20 @@ def _is_cuda() -> bool:
 
 # # ext_modules = []
 
-# if _is_cuda() or _is_hip():
-#     vllm_extension_sources = [
-#         "csrc/cache_kernels.cu",
-#         "csrc/attention/attention_kernels.cu",
-#         "csrc/pos_encoding_kernels.cu",
-#         "csrc/activation_kernels.cu",
-#         "csrc/layernorm_kernels.cu",
-#         "csrc/quantization/squeezellm/quant_cuda_kernel.cu",
-#         "csrc/cuda_utils_kernels.cu",
-#         "csrc/pybind.cpp",
-#     ]
-
-#     if _is_cuda():
-#         vllm_extension_sources.append("csrc/quantization/awq/gemm_kernels.cu")
-#         vllm_extension_sources.append("csrc/quantization/gptq/q_gemm.cu")
+# vllm_extension_sources = [
+#     "csrc/cache_kernels.cu",
+#     "csrc/attention/attention_kernels.cu",
+#     "csrc/pos_encoding_kernels.cu",
+#     "csrc/activation_kernels.cu",
+#     "csrc/layernorm_kernels.cu",
+#     "csrc/quantization/squeezellm/quant_cuda_kernel.cu",
+#     "csrc/quantization/gptq/q_gemm.cu",
+#     "csrc/cuda_utils_kernels.cu",
+#     "csrc/pybind.cpp",
+# ]
+# 
+# if _is_cuda():
+#     vllm_extension_sources.append("csrc/quantization/awq/gemm_kernels.cu")
 
 #     vllm_extension = CUDAExtension(
 #         name="vllm._C",
