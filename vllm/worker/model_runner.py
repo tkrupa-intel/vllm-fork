@@ -402,7 +402,7 @@ class ModelRunner:
         input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).cuda()
         input_positions = torch.zeros(max_batch_size, 1,
                                       dtype=torch.long).cuda()
-        slot_mapping = torch.empty(max_batch_size, 1, dtype=torch.long).cuda()
+        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long).cuda() # FIXME (kzawora): revert this to torch.empty after bridge bug is fixed
         slot_mapping.fill_(_PAD_SLOT_ID)
         context_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
         block_tables = torch.from_numpy(self.graph_block_tables).cuda()
