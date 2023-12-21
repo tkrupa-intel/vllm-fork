@@ -54,6 +54,12 @@ class RMSNorm(nn.Module):
         residual: Optional[torch.Tensor] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         if residual is not None:
+            if x.device.type == "hpu" and FusedRMSNorm:
+                orig_dtype = x.dtype
+                residual += x
+                x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
+                return x.to(orig_dtype), residual
+
             ops.fused_add_rms_norm(
                 x,
                 residual,

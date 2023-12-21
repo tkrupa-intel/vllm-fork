@@ -454,8 +454,8 @@ def get_rope(
         return _ROPE_DICT[key]
 
     if rope_scaling is None:
-        rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
-                                     is_neox_style)
+        rotary_emb = LlamaRotaryEmbedding(head_size, rotary_dim, max_position, base,
+                                          is_neox_style)
     else:
         scaling_type = rope_scaling["type"]
         scaling_factor = rope_scaling["factor"]

@@ -143,17 +143,22 @@ class PagedAttention(nn.Module):
                 key = key.unflatten(0, (batch_size, seq_len))
                 value = value.unflatten(0, (batch_size, seq_len))
 
+            cu_seq_lens = [0]
+            for i in range(len(input_metadata.prompt_lens)):
+                cu_seq_lens.append(cu_seq_lens[-1] + input_metadata.prompt_lens[i])
+            input_metadata.cu_seq_lens = cu_seq_lens
             out = xops.memory_efficient_attention_forward(
                 query,
                 key,
                 value,
+                cu_seq_lens=cu_seq_lens,
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
                 scale=self.scale,
-                op=xops.fmha.MemoryEfficientAttentionFlashAttentionOp[0] if
-                (is_hip()) else None,
             )
-            output = out.view_as(query)
+            output = torch.zeros_like(query)
+            output[:, :out.shape[1], :, :] = out
+            output = output.view_as(query)
         else:
             # Decoding run.
             if key_cache is not None and value_cache is not None:
@@ -236,8 +241,7 @@ def _paged_attention(
         max_num_partitions == 1 or num_seqs * num_heads > 512)
     if use_v1:
         # Run PagedAttention V1.
-        ops.paged_attention_v1(
-            output,
+        output = ops.paged_attention_v1(
             query,
             key_cache,
             value_cache,

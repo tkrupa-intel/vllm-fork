@@ -3,7 +3,7 @@ import torch
 
 from vllm import SamplingParams
 
-MODELS = ["facebook/opt-125m"]
+MODELS = ["lmsys/vicuna-7b-v1.3"]
 
 
 @pytest.mark.parametrize("model", MODELS)
@@ -16,7 +16,7 @@ def test_get_prompt_logprobs(
     example_prompts,
 ):
     max_tokens = 5
-    hf_model = hf_runner(model, dtype=dtype)
+    hf_model = hf_runner(model, dtype="float")
     hf_logprobs = hf_model.generate_greedy_logprobs(
         example_prompts,
         max_tokens=max_tokens,
@@ -24,6 +24,8 @@ def test_get_prompt_logprobs(
     del hf_model
 
     vllm_model = vllm_runner(model, dtype=dtype)
+    import pdb
+    pdb.set_trace()
     vllm_sampling_params = SamplingParams(max_tokens=max_tokens,
                                           logprobs=5,
                                           prompt_logprobs=5,
