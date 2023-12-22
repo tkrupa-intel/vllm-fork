@@ -6,7 +6,7 @@ import torch
 from vllm._C import cache_ops
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
-from vllm.utils import in_wsl
+from vllm.utils import in_wsl, is_hpu
 
 logger = init_logger(__name__)
 
@@ -41,8 +41,10 @@ class CacheEngine:
         self.num_cpu_blocks = cache_config.num_cpu_blocks
 
         # Initialize the cache.
-        # self.gpu_cache = self.allocate_gpu_cache()
-        self.gpu_cache = self.allocate_hpu_cache()
+        if is_hpu():
+            self.gpu_cache = self.allocate_hpu_cache()
+        else:
+            self.gpu_cache = self.allocate_gpu_cache()
         self.cpu_cache = self.allocate_cpu_cache()
 
         # Initialize the stream for caching operations.
@@ -113,7 +115,7 @@ class CacheEngine:
         key_block_shape = self.get_key_block_shape()
         value_block_shape = self.get_value_block_shape()
         # pin_memory = not in_wsl()
-        pin_memory = not in_wsl() and not torch.hpu.is_available()
+        pin_memory = not in_wsl() and not is_hpu()
         if not pin_memory:
             # Pinning memory in WSL is not supported.
             # https://docs.nvidia.com/cuda/wsl-user-guide/index.html#known-limitations-for-linux-cuda-applications
