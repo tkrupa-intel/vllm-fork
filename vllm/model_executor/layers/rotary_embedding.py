@@ -145,8 +145,12 @@ class LlamaRotaryEmbedding(nn.Module):
         key = key.reshape((key.shape[0], key.shape[1], key.shape[2] // self.head_size, self.head_size))
         if query.device.type == "hpu" and FusedRoPE:
             #print('using FusedRoPE')
-            cos = cos[positions].unsqueeze(2)
-            sin = sin[positions].unsqueeze(2)
+            if len(positions[0]) == 1:
+                cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+                sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
+            else:
+                cos = cos[positions].unsqueeze(2)
+                sin = sin[positions].unsqueeze(2)
             query, key = FusedRoPE.apply(query, cos, sin, 0), FusedRoPE.apply(key, cos, sin, 0)
         else:
             #print('using torch RoPE')
