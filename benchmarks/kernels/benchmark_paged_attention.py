@@ -4,7 +4,7 @@ import time
 
 import torch
 
-from vllm.utils import is_hpu()
+from vllm.utils import is_hpu
 if is_hpu():
     from vllm.hpu import ops
 else:

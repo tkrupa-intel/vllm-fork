@@ -30,7 +30,10 @@ def gelu_new(output, input):
 def gelu_fast(output, input):
     raise NotImplementedError
 
-def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
+def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
+    query = query_in.bfloat16()
+    key_cache = key_cache_in.bfloat16()
+    value_cache = value_cache_in.bfloat16()
     num_kv_heads = value_cache[0].shape[0]
     head_size = value_cache[0].shape[1]
     block_size = value_cache[0].shape[2]
@@ -93,7 +96,7 @@ def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block
         out = torch.matmul(attention_probs.to(value.dtype), value).reshape(num_seqs, num_query_heads, head_size)
         output.add_(out)
     htorch.core.mark_step()
-    return output
+    return output.to(dtype=query_in.dtype)
 
 def rms_norm(out, hidden_states, weight, eps):
     htorch.core.mark_step()

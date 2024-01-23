@@ -20,9 +20,9 @@ def create_kv_caches(
     scale = head_size**-0.5
     x = 16 // torch.tensor([], dtype=dtype).element_size()
     if is_hpu():
-        key_cache_shape = (num_blocks, num_heads, head_size // x, block_size, x)
-    else:
         key_cache_shape = (num_blocks, num_heads, head_size, block_size)
+    else:
+        key_cache_shape = (num_blocks, num_heads, head_size // x, block_size, x)
     key_caches = []
     for _ in range(num_layers):
         key_cache = torch.empty(size=key_cache_shape,
