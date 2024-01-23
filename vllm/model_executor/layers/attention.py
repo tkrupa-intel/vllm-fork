@@ -3,7 +3,6 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
-from xformers import ops as xops
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.utils import is_hip, is_hpu
@@ -11,11 +10,13 @@ from vllm.utils import is_hip, is_hpu
 if is_hpu():
     from vllm.hpu import ops
     from vllm.hpu import cache_ops
+    from vllm.hpu import xops
     from vllm.hpu.attn_bias import (BlockDiagonalCausalMask,
                                     LowerTriangularMaskWithTensorBias)
 else:
     from vllm._C import ops
     from vllm._C import cache_ops
+    from xformers import ops as xops
     from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
                                              LowerTriangularMaskWithTensorBias)
 

@@ -3,14 +3,15 @@ from typing import List, Optional, Tuple
 
 import pytest
 import torch
-from xformers import ops as xops
 
 from vllm.utils import get_max_shared_memory_bytes, is_hpu
 if is_hpu():
     from vllm.hpu import ops
+    from vllm.hpu import xops
     from vllm.hpu.attn_bias import BlockDiagonalCausalMask
 else:
     from vllm._C import ops
+    from xformers import ops as xops
     from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
 
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
