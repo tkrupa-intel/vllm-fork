@@ -27,7 +27,11 @@ from typing import Any, Dict, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from vllm._C import ops
+from vllm.utils import is_hpu
+if is_hpu():
+    from vllm.hpu import ops
+else:
+    from vllm._C import ops
 
 
 def _rotate_neox(x: torch.Tensor) -> torch.Tensor:

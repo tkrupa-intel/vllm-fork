@@ -3,10 +3,14 @@ from typing import Dict, List, Tuple
 
 import torch
 
-from vllm._C import cache_ops
 from vllm.config import CacheConfig, ModelConfig, ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import in_wsl, is_hpu
+
+if is_hpu():
+    from vllm.hpu import cache_ops
+else:
+    from vllm._C import cache_ops
 
 logger = init_logger(__name__)
 

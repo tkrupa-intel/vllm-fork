@@ -4,13 +4,20 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 from xformers import ops as xops
-from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
-                                         LowerTriangularMaskWithTensorBias)
 
-from vllm._C import ops
-from vllm._C import cache_ops
 from vllm.model_executor.input_metadata import InputMetadata
-from vllm.utils import is_hip
+from vllm.utils import is_hip, is_hpu
+
+if is_hpu():
+    from vllm.hpu import ops
+    from vllm.hpu import cache_ops
+    from vllm.hpu.attn_bias import (BlockDiagonalCausalMask,
+                                    LowerTriangularMaskWithTensorBias)
+else:
+    from vllm._C import ops
+    from vllm._C import cache_ops
+    from xformers.ops.fmha.attn_bias import (BlockDiagonalCausalMask,
+                                             LowerTriangularMaskWithTensorBias)
 
 _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
@@ -239,7 +246,7 @@ def _paged_attention(
     # For context len > 8192, use V2 kernel to avoid shared memory shortage.
     use_v1 = input_metadata.max_context_len <= 8192 and (
         max_num_partitions == 1 or num_seqs * num_heads > 512)
-    if use_v1:
+    if use_v1 or is_hpu():
         # Run PagedAttention V1.
         output = ops.paged_attention_v1(
             query,

@@ -6,8 +6,6 @@ from platform import uname
 import psutil
 import torch
 
-from vllm._C import cuda_utils
-
 
 class Device(enum.Enum):
     GPU = enum.auto()
@@ -30,6 +28,16 @@ class Counter:
 
 def is_hip() -> bool:
     return torch.version.hip is not None
+
+
+def is_hpu() -> bool:
+    return getattr(torch, 'hpu', None) is not None and torch.hpu.is_available()
+
+
+if is_hpu():
+    from vllm.hpu import cuda_utils
+else:
+    from vllm._C import cuda_utils
 
 
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
@@ -59,7 +67,3 @@ def get_open_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         return s.getsockname()[1]
-
-
-def is_hpu() -> bool:
-    return getattr(torch, 'hpu', None) is not None and torch.hpu.is_available()
