@@ -42,8 +42,6 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
     max_num_blocks_per_seq = block_tables.shape[1]
 
     if alibi_slopes or num_query_heads != num_kv_heads: #or attn_masks is None:
-        import pdb
-        pdb.set_trace()
         raise NotImplementedError
 
     attn_weights_blocks = []

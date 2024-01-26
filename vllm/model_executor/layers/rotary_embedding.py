@@ -126,8 +126,6 @@ class LlamaRotaryEmbedding(nn.Module):
         )
 
     def _set_cos_sin_cache(self, seq_len, device, dtype):
-        #import pdb
-        #pdb.set_trace()
         self.max_seq_len_cached = seq_len
         t = torch.arange(self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype)
 
@@ -138,8 +136,6 @@ class LlamaRotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, positions: torch.Tensor, query: torch.Tensor, key: torch.Tensor):
-        #import pdb
-        #pdb.set_trace()
         seq_len = key.shape[-2]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=query.device, dtype=query.dtype)
@@ -148,7 +144,6 @@ class LlamaRotaryEmbedding(nn.Module):
         query = query.reshape((query.shape[0], query.shape[1], query.shape[2] // self.head_size, self.head_size))
         key = key.reshape((key.shape[0], key.shape[1], key.shape[2] // self.head_size, self.head_size))
         if query.device.type == "hpu" and FusedRoPE:
-            #print('using FusedRoPE')
             if len(positions[0]) == 1:
                 cos = self.cos_cached[positions].unsqueeze(2).to(dtype=query.dtype)
                 sin = self.sin_cached[positions].unsqueeze(2).to(dtype=query.dtype)
@@ -157,7 +152,6 @@ class LlamaRotaryEmbedding(nn.Module):
                 sin = sin[positions].unsqueeze(2)
             query, key = FusedRoPE.apply(query, cos, sin, 0), FusedRoPE.apply(key, cos, sin, 0)
         else:
-            #print('using torch RoPE')
             query, key = apply_rotary_pos_emb(query, key, cos, sin, positions)
         return query.reshape((query.shape[0], query.shape[1], query.shape[2] * query.shape[3])), key.reshape((key.shape[0], key.shape[1], key.shape[2] * key.shape[3]))
 
