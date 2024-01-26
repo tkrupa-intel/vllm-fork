@@ -49,7 +49,8 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
     seq_index = torch.tensor([0], dtype=torch.int64, device="hpu")
 
     for i in range(0, max_num_blocks_per_seq):
-        # hard override for filler. These blocks would contribute nothing to the output due to zero attention_probs and will clog up compute resources
+        # FIXME: dynamic hard override for filler. These blocks would contribute nothing to the output due to zero attention_probs and
+        #  will clog up compute resources. The override itself makes the code unsuitable for graph precompilation
         if (i - 2) * block_size > torch.max(context_lens):
             break
         attn_weights = torch.full((num_seqs, num_query_heads, 1, block_size), torch.finfo(query.dtype).min, dtype=query.dtype, device="hpu")
@@ -66,15 +67,16 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
                     attn_mask = torch.index_select(attn_masks[i], 0, seq_index)
                     attn_weight = torch.masked_fill(attn_weight, ~(attn_mask.unsqueeze(0).to(torch.bool)), torch.finfo(attn_weight.dtype).min)
 
+                # FIXME: these dynamic checks serve to ensure the -inf default value is not overwritten with fillers that would cause errors
+                #  in logsoftmax computation. A change to custom block multiplication code is required to avoid incurring extra costs here
                 if context_lens[seq_id] < (i + 1) * block_size:
                     if context_lens[seq_id] - i*block_size < 0:
                         attn_weight = torch.finfo(query.dtype).min
                     else:
                         attn_weight[:, :, context_lens[seq_id] - i*block_size:] = torch.finfo(query.dtype).min
                 attn_weights.index_copy_(0, seq_index, attn_weight.unsqueeze(0))
-            #attn_weights[attn_weights == 0.0] = torch.finfo(query.dtype).min
-            #if (i - 2) * block_size < max_context_len:
             value = torch.index_select(value_cache, 0, block_tables[seq_id][i])
+            # FIXME: these checks concern filler values in the V cache and should be removed once the underlying issue is addressed
             value = torch.nan_to_num(value)
             value[value < -1.0e+30] = 0.0
             values.index_copy_(0, seq_index, value)
@@ -132,6 +134,8 @@ def apply_rope(
 
 
 def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox_style):
+    # FIXME: the below code is unused legacy code not meant to be used. Use FusedRoPE
+    #  on HPU and delete this once coverage is verified
     raise NotImplementedError
     # update query and key in-place
     num_tokens = query.shape[0]
@@ -167,7 +171,6 @@ def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox_st
 
     # Output query/key shape: [num_tokens, num_tokens, head_size]
     return query, key
-    #raise NotImplementedError
 
 def awq_gemm(*args):
     raise NotImplementedError
