@@ -6,7 +6,6 @@ from platform import uname
 import psutil
 import torch
 
-
 class Device(enum.Enum):
     GPU = enum.auto()
     CPU = enum.auto()
@@ -34,13 +33,11 @@ def is_hpu() -> bool:
     return getattr(torch, 'hpu', None) is not None and torch.hpu.is_available()
 
 
-if is_hpu():
-    from vllm.hpu import cuda_utils
-else:
-    from vllm._C import cuda_utils
-
-
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
+    if is_hpu():
+        from vllm.hpu import cuda_utils
+    else:
+        from vllm._C import cuda_utils
     """Returns the maximum shared memory per thread block in bytes."""
     # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
     cudaDevAttrMaxSharedMemoryPerBlockOptin = 97 if not is_hip() else 74
