@@ -31,9 +31,11 @@ def gelu_fast(output, input):
     raise NotImplementedError
 
 def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
-    query = query_in.bfloat16()
-    key_cache = key_cache_in.bfloat16()
-    value_cache = value_cache_in.bfloat16()
+    device = 'hpu'
+    query = query_in.bfloat16().to(device)
+    key_cache = key_cache_in.bfloat16().to(device)
+    value_cache = value_cache_in.bfloat16().to(device)
+    block_tables = block_tables.to(device)
     num_kv_heads = value_cache[0].shape[0]
     head_size = value_cache[0].shape[1]
     block_size = value_cache[0].shape[2]
@@ -41,27 +43,31 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
     num_query_heads = query.shape[1]
     max_num_blocks_per_seq = block_tables.shape[1]
 
-    if alibi_slopes or num_query_heads != num_kv_heads: #or attn_masks is None:
+    if alibi_slopes:
         import pdb
         pdb.set_trace()
         raise NotImplementedError
 
+    num_queries_per_kv = num_query_heads // num_kv_heads
     attn_weights_blocks = []
     value_blocks = []
-    seq_index = torch.tensor([0], dtype=torch.int64, device="hpu")
+    seq_index = torch.tensor([0], dtype=torch.int64, device=device)
 
     for i in range(0, max_num_blocks_per_seq):
         # hard override for filler. These blocks would contribute nothing to the output due to zero attention_probs and will clog up compute resources
         if (i - 2) * block_size > torch.max(context_lens):
             break
-        attn_weights = torch.full((num_seqs, num_query_heads, 1, block_size), torch.finfo(query.dtype).min, dtype=query.dtype, device="hpu")
-        values = torch.zeros((num_seqs, num_query_heads, head_size, block_size), dtype=query.dtype, device="hpu")
+        attn_weights = torch.full((num_seqs, num_query_heads, 1, block_size), torch.finfo(query.dtype).min, dtype=query.dtype, device=device)
+        values = torch.zeros((num_seqs, num_kv_heads, head_size, block_size), dtype=query.dtype, device=device)
         for seq_id in range(num_seqs):
             seq_index.fill_(seq_id)
             if i * block_size < context_lens[seq_id]:
 
                 q =  torch.index_select(query, 0, seq_index).transpose(0, 1)
                 key = torch.index_select(key_cache, 0, block_tables[seq_id][i]).squeeze(0)
+                if num_queries_per_kv > 1:
+                    # Handle MQA and GQA
+                    key = torch.repeat_interleave(key, num_queries_per_kv, dim=0)
                 attn_weight = scale * torch.matmul(q, key)
 
                 if attn_masks is not None:
@@ -80,12 +86,13 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
             value = torch.nan_to_num(value)
             value[value < -1.0e+30] = 0.0
             values.index_copy_(0, seq_index, value)
-            torch.hpu.synchronize()
+            if device == 'hpu':
+                torch.hpu.synchronize()
 
         attn_weights_blocks.append(attn_weights.reshape(num_seqs * num_query_heads, 1, block_size))
-        value_blocks.append(values.reshape(num_seqs * num_query_heads, head_size, block_size).transpose(1, 2))
+        value_blocks.append(values.reshape(num_seqs * num_kv_heads, head_size, block_size).transpose(1, 2))
 
-    exp_sum = torch.zeros((*attn_weights_blocks[0].shape[:2], 1), dtype=attn_weights_blocks[0].dtype, device="hpu")
+    exp_sum = torch.zeros((*attn_weights_blocks[0].shape[:2], 1), dtype=attn_weights_blocks[0].dtype, device=device)
     for x in attn_weights_blocks:
         exp_sum.add_(torch.exp(x).sum(dim=-1, keepdim=True))
 
@@ -93,9 +100,14 @@ def paged_attention_v1(query_in, key_cache_in, value_cache_in, head_mapping, sca
     for i in range(len(attn_weights_blocks)):
         attention_probs = torch.exp(attn_weights_blocks[i]) / exp_sum
         value = value_blocks[i]
+        if num_queries_per_kv > 1:
+            # Handle MQA and GQA
+            value_4d_view = value.reshape(num_seqs, num_kv_heads, block_size, head_size)
+            value = torch.repeat_interleave(value_4d_view, num_queries_per_kv, dim=1).reshape(num_seqs * num_query_heads, block_size, head_size)
         out = torch.matmul(attention_probs.to(value.dtype), value).reshape(num_seqs, num_query_heads, head_size)
         output.add_(out)
-    htorch.core.mark_step()
+    if device == 'hpu':
+        htorch.core.mark_step()
     return output.to(dtype=query_in.dtype)
 
 def rms_norm(out, hidden_states, weight, eps):
