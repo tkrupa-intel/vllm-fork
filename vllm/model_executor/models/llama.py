@@ -102,12 +102,16 @@ class LlamaAttention(nn.Module):
             # Number of KV heads is greater than TP size, so we partition
             # the KV heads across multiple tensor parallel GPUs.
             assert self.total_num_kv_heads % tp_size == 0
+            #print(f'Number of KV heads {self.total_num_kv_heads} is greater than TP size ({tp_size}). KV heads will be partitioned across multiple tensor parallel GPUs.')
         else:
             # Number of KV heads is less than TP size, so we replicate
             # the KV heads across multiple tensor parallel GPUs.
             assert tp_size % self.total_num_kv_heads == 0
+            #print(f'Number of KV heads {self.total_num_kv_heads} is less than TP size ({tp_size}). KV heads will be replicated across multiple tensor parallel GPUs.')
         self.num_kv_heads = max(1, self.total_num_kv_heads // tp_size)
         self.head_dim = hidden_size // self.total_num_heads
+        #if self.num_heads != self.num_kv_heads:
+        #    print(f'Number of query heads (pre TP: {num_heads}, post TP: {self.num_heads}) is different from number of KV heads (pre TP: {num_kv_heads}, post TP: {self.num_kv_heads})!')
         self.q_size = self.num_heads * self.head_dim
         self.kv_size = self.num_kv_heads * self.head_dim
         self.scaling = self.head_dim**-0.5

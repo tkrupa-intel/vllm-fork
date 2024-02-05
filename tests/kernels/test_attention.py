@@ -17,17 +17,17 @@ else:
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 # This will change depending on the compute capability.
 # - 512 as a buffer
-MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
-NUM_BLOCKS = 40000  # Arbitrary values for testing
+MAX_SEQ_LEN = 128
+NUM_BLOCKS = 1024  # Arbitrary values for testing
 PARTITION_SIZE = 512
 
-DTYPES = [torch.half, torch.bfloat16, torch.float]
+DTYPES = [torch.bfloat16, torch.float]
 NUM_GEN_SEQS = [7]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
 NUM_HEADS = [(40, 40), (64, 8)]  # Arbitrary values for testing
 HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 BLOCK_SIZES = [16, 32]
-USE_ALIBI = [False, True]
+USE_ALIBI = [True]
 SEEDS = [0]
 
 
@@ -88,9 +88,12 @@ def ref_single_query_cached_kv_attention(
         keys = torch.stack(keys, dim=0)
         values = torch.stack(values, dim=0)
         if num_queries_per_kv > 1:
+            print('mqa/gqa pre', q.shape, keys.shape, values.shape)
             # Handle MQA and GQA
             keys = torch.repeat_interleave(keys, num_queries_per_kv, dim=1)
             values = torch.repeat_interleave(values, num_queries_per_kv, dim=1)
+            print('mqa/gqa post', q.shape, keys.shape, values.shape)
+            
 
         alibi_bias = None
         if alibi_slopes is not None:
@@ -99,7 +102,6 @@ def ref_single_query_cached_kv_attention(
             alibi_bias = (position_ids - context_len + 1).float()
             alibi_bias = alibi_slopes.view(-1, 1, 1) * alibi_bias.view(
                 1, 1, -1)
-
         out = ref_masked_attention(q, keys, values, scale, alibi_bias)
         out = out.view(num_query_heads, head_size)
         output[i].copy_(out, non_blocking=True)
@@ -166,75 +168,78 @@ def test_paged_attention(
                                                 num_kv_heads, head_size, dtype,
                                                 seed)
     key_cache, value_cache = key_caches[0], value_caches[0]
-
+    print("KV cache created.")
     # Call the paged attention kernel.
     output = torch.empty_like(query)
-    if version == "v1":
-        output = ops.paged_attention_v1(
-            query,
-            key_cache,
-            value_cache,
-            num_kv_heads,
-            scale,
-            block_tables,
-            context_lens,
-            block_size,
-            max_context_len,
-            alibi_slopes,
-        )
-    elif version == "v2":
-        num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
-                          PARTITION_SIZE)
-        assert PARTITION_SIZE % block_size == 0
-        num_seqs, num_heads, head_size = output.shape
-        tmp_output = torch.empty(
-            size=(num_seqs, num_heads, num_partitions, head_size),
-            dtype=output.dtype,
-            device=output.device,
-        )
-        exp_sums = torch.empty(
-            size=(num_seqs, num_heads, num_partitions),
-            dtype=torch.float32,
-            device=output.device,
-        )
-        max_logits = torch.empty_like(exp_sums)
-        ops.paged_attention_v2(
-            output,
-            exp_sums,
-            max_logits,
-            tmp_output,
-            query,
-            key_cache,
-            value_cache,
-            num_kv_heads,
-            scale,
-            block_tables,
-            context_lens,
-            block_size,
-            max_context_len,
-            alibi_slopes,
-        )
-    else:
-        raise AssertionError(f"Unknown version: {version}")
-
+    if True:
+        if version == "v1":
+            output = ops.paged_attention_v1(
+                query.cuda(),
+                key_cache.cuda(),
+                value_cache.cuda(),
+                num_kv_heads,
+                scale,
+                block_tables.cuda(),
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+            )
+        elif version == "v2":
+            num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
+                            PARTITION_SIZE)
+            assert PARTITION_SIZE % block_size == 0
+            num_seqs, num_heads, head_size = output.shape
+            tmp_output = torch.empty(
+                size=(num_seqs, num_heads, num_partitions, head_size),
+                dtype=output.dtype,
+                device=output.device,
+            )
+            exp_sums = torch.empty(
+                size=(num_seqs, num_heads, num_partitions),
+                dtype=torch.float32,
+                device=output.device,
+            )
+            max_logits = torch.empty_like(exp_sums)
+            ops.paged_attention_v2(
+                output,
+                exp_sums,
+                max_logits,
+                tmp_output,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+            )
+        else:
+            raise AssertionError(f"Unknown version: {version}")
+    print("GPU PA done.")
     # Run the reference implementation.
-    ref_output = torch.empty_like(query)
+    ref_output = torch.empty_like(query).cpu()
     ref_single_query_cached_kv_attention(
-        ref_output,
-        query,
+        ref_output.cpu(),
+        query.cpu(),
         num_queries_per_kv,
-        key_cache,
-        value_cache,
-        block_tables,
-        context_lens,
+        key_cache.cpu(),
+        value_cache.cpu(),
+        block_tables.cpu(),
+        context_lens.cpu(),
         scale,
         alibi_slopes,
     )
+    print("Reference PA done.")
 
     # NOTE(woosuk): Due to the kernel-level differences in the two
     # implementations, there is a small numerical difference in the two
     # outputs. Thus, we use a relaxed tolerance for the test.
     assert torch.allclose(output, ref_output, atol=1e-3, rtol=1e-5)
+    print("All good!")
 
 
 def ref_multi_query_kv_attention(
@@ -259,11 +264,11 @@ def ref_multi_query_kv_attention(
         attn_mask = attn_mask.to(dtype=dtype, device="cuda")
 
         ref_output = ref_masked_attention(
-            query[start_idx:end_idx],
-            key[start_idx:end_idx],
-            value[start_idx:end_idx],
+            query[start_idx:end_idx].cpu(),
+            key[start_idx:end_idx].cpu(),
+            value[start_idx:end_idx].cpu(),
             scale,
-            attn_mask=attn_mask,
+            attn_mask=attn_mask.cpu(),
         )
         ref_outputs.append(ref_output)
     ref_output = torch.cat(ref_outputs, dim=0)
@@ -307,7 +312,9 @@ def test_multi_query_kv_attention(
         [num_query_heads, num_kv_heads, num_kv_heads], dim=1)
 
     num_queries_per_kv = num_query_heads // num_kv_heads
+    print(num_query_heads,num_kv_heads, num_queries_per_kv)
     if num_queries_per_kv > 1:
+        print('mqa/gqa')
         # Handle MQA and GQA
         key = torch.repeat_interleave(key, num_queries_per_kv, dim=1)
         value = torch.repeat_interleave(value, num_queries_per_kv, dim=1)

@@ -3,6 +3,7 @@ from typing import List, Optional
 
 import torch
 import torch.nn as nn
+#import os 
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.utils import is_hip, is_hpu
@@ -87,6 +88,7 @@ class PagedAttention(nn.Module):
         Returns:
             shape = [batch_size, seq_len, num_heads * head_size]
         """
+        #print(f'[HPU:{os.environ.get("LOCAL_RANK", "-1")}] PagedAttention: q: {query.shape} k: {key.shape} v: {value.shape}, is_prompt {input_metadata.is_prompt}')
         batch_size, seq_len, hidden_size = query.shape
         # Reshape the query, key, and value tensors.
         query = query.view(-1, self.num_heads, self.head_size)
