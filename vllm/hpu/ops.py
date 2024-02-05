@@ -137,40 +137,6 @@ def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox_st
     # FIXME: the below code is unused legacy code not meant to be used. Use FusedRoPE
     #  on HPU and delete this once coverage is verified
     raise NotImplementedError
-    # update query and key in-place
-    num_tokens = query.shape[0]
-    num_heads = query.shape[-1] // head_size
-    query = query.view(num_tokens, num_heads, head_size)
-    key = key.view(num_tokens, num_heads, head_size)
-    cos, sin = torch.split(cos_sin_cache, cos_sin_cache.shape[-1] // 2, dim=-1)
-    if is_neox_style:
-        sin = torch.cat((sin, sin), dim=-1)
-        cos = torch.cat((cos, cos), dim=-1)
-    else:
-        sin = torch.repeat_interleave(sin, 2, -1)
-        cos = torch.repeat_interleave(cos, 2, -1)
-
-    query_rot = query[..., :head_size]
-    query_pass = query[..., head_size:]
-    key_rot = key[..., :head_size]
-    key_pass = key[..., head_size:]
-
-    query_rot = query_rot.transpose(0, 1)
-    key_rot = key_rot.transpose(0, 1)
-    cos = F.embedding(positions, cos)
-    sin = F.embedding(positions, sin)
-
-    query_rot, key_rot = apply_rope(query_rot, key_rot, cos, sin,
-                                    is_neox_style)
-    query_rot = query_rot.transpose(0, 1).contiguous()
-    key_rot = key_rot.transpose(0, 1).contiguous()
-
-    query.copy_(torch.cat((query_rot, query_pass), dim=-1))
-    key.copy_(torch.cat((key_rot, key_pass), dim=-1))
-    htorch.core.mark_step()
-
-    # Output query/key shape: [num_tokens, num_tokens, head_size]
-    return query, key
 
 def awq_gemm(*args):
     raise NotImplementedError

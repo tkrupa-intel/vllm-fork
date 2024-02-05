@@ -51,7 +51,7 @@ def get_device_name():
     """
     Returns the name of the current device: Gaudi or Gaudi2.
 
-    Inspired from: https://github.com/HabanaAI/Model-References/blob/a87c21f14f13b70ffc77617b9e80d1ec989a3442/PyTorch/computer_vision/classification/torchvision/utils.py#L274
+    Inspired by: https://github.com/HabanaAI/Model-References/blob/a87c21f14f13b70ffc77617b9e80d1ec989a3442/PyTorch/computer_vision/classification/torchvision/utils.py#L274
     """
     import habana_frameworks.torch.utils.experimental as htexp
 
