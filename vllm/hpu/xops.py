@@ -141,6 +141,8 @@ def memory_efficient_attention_forward(
         )
         outputs.append(output)
     out = torch.cat(outputs, dim=0)
+    if B == 1:
+        Mq = cu_seq_lens[-1]
     if dim == 4:
         out = out.reshape(B, Mq, H, K)
     elif dim == 5:
