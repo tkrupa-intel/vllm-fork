@@ -285,8 +285,8 @@ def get_requirements() -> List[str]:
     if _is_hip():
         with open(get_path("requirements-rocm.txt")) as f:
             requirements = f.read().strip().split("\n")
-    elif _is_cuda():
-        with open(get_path("requirements-cuda.txt")) as f:
+    elif not _is_cuda() and not _is_hip():
+        with open(get_path("requirements-hpu.txt")) as f:
             requirements = f.read().strip().split("\n")
     else:
         with open(get_path("requirements.txt")) as f:
