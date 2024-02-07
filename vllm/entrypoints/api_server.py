@@ -2,8 +2,9 @@ import argparse
 import json
 from typing import AsyncGenerator
 import torch
-import habana_frameworks.torch.core as htcore
-import habana_frameworks.torch.gpu_migration
+if torch.version.cuda is None and torch.version.hip is None:
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 import uvicorn

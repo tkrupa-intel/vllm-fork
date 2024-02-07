@@ -9,8 +9,9 @@ import time
 from http import HTTPStatus
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 import torch
-import habana_frameworks.torch.core as htcore
-import habana_frameworks.torch.gpu_migration
+if torch.version.cuda is None and torch.version.hip is None:
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
 from aioprometheus import MetricsMiddleware
 from aioprometheus.asgi.starlette import metrics
 import fastapi
