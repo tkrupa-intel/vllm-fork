@@ -137,8 +137,6 @@ class Scheduler:
             # sequence groups are added to the front and the new sequence groups
             # are added to the back.
             while self.waiting:
-                if len(scheduled) == 4:
-                    break
                 seq_group = self.waiting[0]
 
                 assert seq_group.num_seqs() == 1, (
