@@ -8,9 +8,9 @@ from vllm.engine.llm_engine import LLMEngine
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
+from vllm.utils import is_hpu
 
 import torch
-import habana_frameworks.torch as htorch
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -181,7 +181,8 @@ class LLM:
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
             pbar = tqdm(total=num_requests, desc="Processed prompts")
-        if profiling:
+        
+        if profiling and is_hpu():
             prof = torch.profiler.profile(
                 schedule = torch.profiler.schedule(wait=6, warmup=0, active=2, repeat=1),
                 activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU],
@@ -196,21 +197,15 @@ class LLM:
         outputs: List[RequestOutput] = []
         while self.llm_engine.has_unfinished_requests():
             step_outputs = self.llm_engine.step()
-            print("vLLM completed a step")
-            if profiling:
-                count += 1
-                print(f"Processing step {count}")
-                if count == 8:
-                    break
             for output in step_outputs:
                 if output.finished:
                     outputs.append(output)
                     if use_tqdm:
                         pbar.update(1)
-            if profiling:
+            if profiling and is_hpu():
                 htorch.core.mark_step()
                 prof.step()
-        if profiling:
+        if profiling and is_hpu():
             htorch.hpu.synchronize()
             prof.stop()
         if use_tqdm:

@@ -17,7 +17,7 @@ MAIN_CUDA_VERSION = "12.1"
 # Supported NVIDIA GPU architectures.
 NVIDIA_SUPPORTED_ARCHS = {"7.0", "7.5", "8.0", "8.6", "8.9", "9.0"}
 ROCM_SUPPORTED_ARCHS = {"gfx90a", "gfx908", "gfx906", "gfx1030", "gfx1100"}
-#SUPPORTED_ARCHS = NVIDIA_SUPPORTED_ARCHS.union(ROCM_SUPPORTED_ARCHS)
+# SUPPORTED_ARCHS = NVIDIA_SUPPORTED_ARCHS.union(ROCM_SUPPORTED_ARCHS)
 
 def _is_hip() -> bool:
     return torch.version.hip is not None
@@ -103,7 +103,7 @@ def get_nvcc_cuda_version(cuda_dir: str) -> Version:
 
 
 def get_torch_arch_list() -> Set[str]:
-    if _is_cuda():
+    if _is_cuda() or _is_hip():
         # TORCH_CUDA_ARCH_LIST can have one or more architectures,
         # e.g. "8.0" or "7.5,8.0,8.6+PTX". Here, the "8.6+PTX" option asks the
         # compiler to additionally include PTX code that can be runtime-compiled
@@ -139,7 +139,9 @@ def get_torch_arch_list() -> Set[str]:
                 f"{valid_archs}.",
                 stacklevel=2)
         return arch_list
-
+    else:
+        return set()
+        
 # First, check the TORCH_CUDA_ARCH_LIST environment variable.
 compute_capabilities = get_torch_arch_list()
 if _is_cuda() and not compute_capabilities:

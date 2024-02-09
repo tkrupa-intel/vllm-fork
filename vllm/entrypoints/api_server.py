@@ -69,16 +69,6 @@ async def generate(request: Request) -> Response:
     prompt = final_output.prompt
     text_outputs = [prompt + output.text for output in final_output.outputs]
     ret = {"text": text_outputs}
-    DEBUG = True
-    if DEBUG:
-        text_tokens = [output.token_ids for output in final_output.outputs]
-        from vllm.transformers_utils.tokenizer import get_tokenizer
-        tokenizer = get_tokenizer('lmsys/vicuna-7b-v1.3')
-        decoded_tokens = [tokenizer.decode(token_ids) for token_ids in text_tokens]
-        ret["DEBUG"] = {
-            'tokens': text_tokens,
-            'decoded_tokens': decoded_tokens,
-        }
     return JSONResponse(ret)
 
 
