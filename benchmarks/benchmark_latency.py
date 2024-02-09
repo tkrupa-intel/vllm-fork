@@ -6,6 +6,8 @@ from typing import Optional
 
 import numpy as np
 import torch
+if torch.version.cuda is None and torch.version.hip is None:
+    import habana_frameworks.torch as htorch
 from tqdm import tqdm
 
 from vllm import LLM, SamplingParams

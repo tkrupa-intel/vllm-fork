@@ -6,6 +6,8 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
+if torch.version.cuda is None and torch.version.hip is None:
+    import habana_frameworks.torch as htorch
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
 from tqdm import tqdm
@@ -90,10 +92,6 @@ def run_vllm(
         dtype=dtype,
         max_model_len=max_model_len,
         enforce_eager=enforce_eager,
-        max_num_batched_tokens=(16 * 128),
-        max_num_seqs=20,
-        max_paddings=(16 * 128),
-        block_size=32,
     )
 
     # Add the requests to the engine.
