@@ -26,7 +26,7 @@ def api_server():
         "api_server_async_engine.py").absolute()
     uvicorn_process = subprocess.Popen([
         sys.executable, "-u",
-        str(script_path), "--model", "lmsys/vicuna-7b-v1.3"
+        str(script_path), "--model", "facebook/opt-125m",
     ])
     yield
     uvicorn_process.terminate()

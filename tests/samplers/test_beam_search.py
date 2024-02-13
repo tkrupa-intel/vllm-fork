@@ -10,7 +10,7 @@ import pytest
 #   3. Use the model "huggyllama/llama-7b".
 MAX_TOKENS = [128]
 BEAM_WIDTHS = [4]
-MODELS = ["lmsys/vicuna-7b-v1.3"]
+MODELS = ["facebook/opt-125m"]
 
 
 @pytest.mark.parametrize("model", MODELS)

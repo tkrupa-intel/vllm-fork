@@ -6,6 +6,8 @@ import torch
 
 from vllm.utils import get_max_shared_memory_bytes, is_hpu
 if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
     from vllm.hpu import ops
     from vllm.hpu import xops
     from vllm.hpu.attn_bias import BlockDiagonalCausalMask
@@ -21,6 +23,9 @@ MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
 NUM_BLOCKS = 40000  # Arbitrary values for testing
 PARTITION_SIZE = 512
 
+VERSION = ["v1", "v2"]
+if is_hpu():
+    VERSION.pop()
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_GEN_SEQS = [7]  # Arbitrary values for testing
 NUM_PREFILL_SEQS = [3]  # Arbitrary values for testing
@@ -105,7 +110,7 @@ def ref_single_query_cached_kv_attention(
         output[i].copy_(out, non_blocking=True)
 
 
-@pytest.mark.parametrize("version", ["v1"])#, "v2"])
+@pytest.mark.parametrize("version", VERSION)
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -169,53 +174,67 @@ def test_paged_attention(
 
     # Call the paged attention kernel.
     output = torch.empty_like(query)
-    if version == "v1":
+    if is_hpu():
         output = ops.paged_attention_v1(
             query,
             key_cache,
             value_cache,
             num_kv_heads,
             scale,
-            block_tables,
-            context_lens,
+            input_metadata.block_tables,
+            input_metadata.context_lens,
             block_size,
-            max_context_len,
-            alibi_slopes,
-        )
-    elif version == "v2":
-        num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
-                          PARTITION_SIZE)
-        assert PARTITION_SIZE % block_size == 0
-        num_seqs, num_heads, head_size = output.shape
-        tmp_output = torch.empty(
-            size=(num_seqs, num_heads, num_partitions, head_size),
-            dtype=output.dtype,
-            device=output.device,
-        )
-        exp_sums = torch.empty(
-            size=(num_seqs, num_heads, num_partitions),
-            dtype=torch.float32,
-            device=output.device,
-        )
-        max_logits = torch.empty_like(exp_sums)
-        ops.paged_attention_v2(
-            output,
-            exp_sums,
-            max_logits,
-            tmp_output,
-            query,
-            key_cache,
-            value_cache,
-            num_kv_heads,
-            scale,
-            block_tables,
-            context_lens,
-            block_size,
-            max_context_len,
+            input_metadata.max_context_len,
             alibi_slopes,
         )
     else:
-        raise AssertionError(f"Unknown version: {version}")
+        if version == "v1":
+            output = ops.paged_attention_v1(
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+            )
+        elif version == "v2":
+            num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
+                            PARTITION_SIZE)
+            assert PARTITION_SIZE % block_size == 0
+            num_seqs, num_heads, head_size = output.shape
+            tmp_output = torch.empty(
+                size=(num_seqs, num_heads, num_partitions, head_size),
+                dtype=output.dtype,
+                device=output.device,
+            )
+            exp_sums = torch.empty(
+                size=(num_seqs, num_heads, num_partitions),
+                dtype=torch.float32,
+                device=output.device,
+            )
+            max_logits = torch.empty_like(exp_sums)
+            ops.paged_attention_v2(
+                output,
+                exp_sums,
+                max_logits,
+                tmp_output,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+            )
+        else:
+            raise AssertionError(f"Unknown version: {version}")
 
     # Run the reference implementation.
     ref_output = torch.empty_like(query)
