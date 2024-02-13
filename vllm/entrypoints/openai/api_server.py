@@ -9,7 +9,8 @@ import time
 from http import HTTPStatus
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
 import torch
-if torch.version.cuda is None and torch.version.hip is None:
+from vllm.utils import is_hpu
+if is_hpu():
     import habana_frameworks.torch.core as htcore
     import habana_frameworks.torch.gpu_migration
 from aioprometheus import MetricsMiddleware
