@@ -1,6 +1,7 @@
 import enum
 import socket
 import uuid
+import importlib
 from platform import uname
 
 import psutil
@@ -31,7 +32,7 @@ def is_hip() -> bool:
 
 
 def is_hpu() -> bool:
-    return getattr(torch, 'hpu', None) is not None and torch.hpu.is_available()
+    return importlib.util.find_spec('habana_frameworks') is not None
 
 
 if is_hpu():
