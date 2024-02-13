@@ -26,7 +26,8 @@ import aiohttp
 import numpy as np
 from transformers import PreTrainedTokenizerBase
 import torch
-if torch.version.cuda is None and torch.version.hip is None:
+from vllm.utils import is_hpu
+if is_hpu():
     import habana_frameworks.torch as htorch
 from vllm.transformers_utils.tokenizer import get_tokenizer
 

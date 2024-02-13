@@ -6,7 +6,8 @@ import time
 from typing import List, Optional, Tuple
 
 import torch
-if torch.version.cuda is None and torch.version.hip is None:
+from vllm.utils import is_hpu
+if is_hpu():
     import habana_frameworks.torch as htorch
 from transformers import (AutoModelForCausalLM, AutoTokenizer,
                           PreTrainedTokenizerBase)
