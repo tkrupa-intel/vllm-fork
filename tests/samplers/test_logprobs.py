@@ -16,7 +16,7 @@ def test_get_prompt_logprobs(
     example_prompts,
 ):
     max_tokens = 5
-    hf_model = hf_runner(model, dtype="float")
+    hf_model = hf_runner(model, dtype=dtype)
     hf_logprobs = hf_model.generate_greedy_logprobs(
         example_prompts,
         max_tokens=max_tokens,

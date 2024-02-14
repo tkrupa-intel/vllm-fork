@@ -181,15 +181,16 @@ def test_paged_attention(
             value_cache,
             num_kv_heads,
             scale,
-            input_metadata.block_tables,
-            input_metadata.context_lens,
+            block_tables,
+            context_lens,
             block_size,
-            input_metadata.max_context_len,
+            max_context_len,
             alibi_slopes,
         )
     else:
         if version == "v1":
-            output = ops.paged_attention_v1(
+            ops.paged_attention_v1(
+                output,
                 query,
                 key_cache,
                 value_cache,
@@ -331,19 +332,31 @@ def test_multi_query_kv_attention(
         key = torch.repeat_interleave(key, num_queries_per_kv, dim=1)
         value = torch.repeat_interleave(value, num_queries_per_kv, dim=1)
     attn_bias = BlockDiagonalCausalMask.from_seqlens(seq_lens)
-    output = xops.memory_efficient_attention_forward(
-        query.unsqueeze(0),
-        key.unsqueeze(0),
-        value.unsqueeze(0),
-        attn_bias=attn_bias,
-        p=0.0,
-        scale=scale,
-    )
-    output = output.squeeze(0)
-
     cu_seq_lens = [0]
     for seq_len in seq_lens:
         cu_seq_lens.append(cu_seq_lens[-1] + seq_len)
+    
+    if is_hpu():
+        output = xops.memory_efficient_attention_forward(
+            query.unsqueeze(0),
+            key.unsqueeze(0),
+            value.unsqueeze(0),
+            cu_seq_lens,
+            attn_bias=attn_bias,
+            p=0.0,
+            scale=scale,
+        )        
+    else:
+        output = xops.memory_efficient_attention_forward(
+            query.unsqueeze(0),
+            key.unsqueeze(0),
+            value.unsqueeze(0),
+            attn_bias=attn_bias,
+            p=0.0,
+            scale=scale,
+        )
+    output = output.squeeze(0)
+
     ref_output = ref_multi_query_kv_attention(
         cu_seq_lens,
         query,
