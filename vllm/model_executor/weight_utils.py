@@ -16,6 +16,7 @@ from tqdm.auto import tqdm
 from vllm.logger import init_logger
 from vllm.model_executor.layers.quantization import (get_quantization_config,
                                                      QuantizationConfig)
+from vllm.utils import is_hpu
 
 logger = init_logger(__name__)
 
@@ -246,7 +247,8 @@ def hf_model_weights_iterator(
             for name, param in state.items():
                 yield name, param
             del state
-            torch.cuda.empty_cache()
+            if not is_hpu():
+                torch.cuda.empty_cache()
 
 
 def convert_pyslice_to_tensor(x: Any) -> torch.Tensor:

@@ -42,7 +42,10 @@ def test_copy_blocks(
 ) -> None:
     random.seed(seed)
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
 
     # Generate random block mappings where each source block is mapped to two
     # destination blocks.
@@ -105,19 +108,24 @@ def test_reshape_and_cache(
 ) -> None:
     random.seed(seed)
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
+
+    device = "hpu" if is_hpu() else "cuda"
 
     # Create a random slot mapping.
     num_slots = block_size * num_blocks
     slot_mapping = random.sample(range(num_slots), num_tokens)
-    slot_mapping = torch.tensor(slot_mapping, dtype=torch.long, device="cuda")
+    slot_mapping = torch.tensor(slot_mapping, dtype=torch.long, device=device)
 
     qkv = torch.randn(num_tokens,
                       3,
                       num_heads,
                       head_size,
                       dtype=dtype,
-                      device="cuda")
+                      device=device)
     _, key, value = qkv.unbind(dim=1)
 
     # Create the KV caches.

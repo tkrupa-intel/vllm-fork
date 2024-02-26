@@ -4,9 +4,6 @@ from typing import List, Optional, Tuple
 import pytest
 import torch
 from vllm.utils import is_hpu
-if is_hpu():
-    import habana_frameworks.torch.core as htcore
-    import habana_frameworks.torch.gpu_migration
 from transformers import AutoModelForCausalLM
 
 from vllm import LLM, SamplingParams

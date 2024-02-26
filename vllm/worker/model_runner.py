@@ -121,18 +121,22 @@ class ModelRunner:
                 slot_mapping[-1].append(slot)
 
         max_prompt_len = max(prompt_lens)
+        device = "hpu" if is_hpu() else "cuda"
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_prompt_len,
                                              pad=0,
-                                             dtype=torch.long)
+                                             dtype=torch.long,
+                                             device=device)
         input_positions = _make_tensor_with_pad(input_positions,
                                                 max_prompt_len,
                                                 pad=0,
-                                                dtype=torch.long)
+                                                dtype=torch.long,
+                                                device=device)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
                                              pad=_PAD_SLOT_ID,
-                                             dtype=torch.long)
+                                             dtype=torch.long,
+                                             device=device)
 
         input_metadata = InputMetadata(
             prompt_lens=prompt_lens,
@@ -205,7 +209,7 @@ class ModelRunner:
 
         # When using CUDA graph, we don't need to make the tensors on the GPU
         # because they will be eventually copied to the designated GPU buffer.
-        device = "cpu" if use_captured_graph else "cuda"
+        device = "cpu" if use_captured_graph else "hpu" if is_hpu() else "cuda"
         pin_memory = use_captured_graph and not self.in_wsl
         input_tokens = _make_tensor_with_pad(input_tokens,
                                              max_len=1,
@@ -239,11 +243,13 @@ class ModelRunner:
                     input_block_tables[i, :len(block_table)] = block_table
             block_tables = torch.tensor(input_block_tables, device=device)
         else:
+            device = "hpu" if is_hpu() else "cuda"
             block_tables = _make_tensor_with_pad(
                 block_tables,
                 max_len=max_context_len,
                 pad=0,
                 dtype=torch.int,
+                device=device
             )
 
         input_metadata = InputMetadata(
@@ -394,7 +400,10 @@ class ModelRunner:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [(None, None)] * num_layers
         self.execute_model(seqs, kv_caches)
-        torch.cuda.synchronize()
+        if is_hpu():
+            torch.hpu.synchronize()
+        else:
+            torch.cuda.synchronize()
         return
 
     @torch.inference_mode()
@@ -411,13 +420,14 @@ class ModelRunner:
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).cuda()
+        device = "hpu" if is_hpu() else "cuda"
+        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long, device=device)
         input_positions = torch.zeros(max_batch_size, 1,
-                                      dtype=torch.long).cuda()
-        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long).cuda() # FIXME (kzawora): revert this to torch.empty after bridge bug is fixed
+                                      dtype=torch.long, device=device)
+        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long, device=device) # FIXME (kzawora): revert this to torch.empty after bridge bug is fixed
         slot_mapping.fill_(_PAD_SLOT_ID)
-        context_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
-        block_tables = torch.from_numpy(self.graph_block_tables).cuda()
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32, device=device)
+        block_tables = torch.from_numpy(self.graph_block_tables, device=device)
 
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
@@ -561,4 +571,5 @@ def _get_graph_batch_size(batch_size: int) -> int:
 
 def _async_h2d(data: list, dtype, pin_memory):
     t = torch.tensor(data, dtype=dtype, pin_memory=pin_memory)
-    return t.to(device="cuda", non_blocking=True)
+    device = "hpu" if is_hpu() else "cuda"
+    return t.to(device=device, non_blocking=True)

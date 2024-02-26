@@ -15,7 +15,10 @@ def create_kv_caches(
     seed: int,
 ) -> Tuple[List[torch.Tensor], List[torch.Tensor]]:
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
 
     scale = head_size**-0.5
     x = 16 // torch.tensor([], dtype=dtype).element_size()
@@ -23,11 +26,13 @@ def create_kv_caches(
         key_cache_shape = (num_blocks, num_heads, head_size, block_size)
     else:
         key_cache_shape = (num_blocks, num_heads, head_size // x, block_size, x)
+
+    device = "hpu" if is_hpu() else "cuda"
     key_caches = []
     for _ in range(num_layers):
         key_cache = torch.empty(size=key_cache_shape,
                                 dtype=dtype,
-                                device='cuda')
+                                device=device)
         key_cache.uniform_(-scale, scale)
         key_caches.append(key_cache)
 
@@ -36,7 +41,7 @@ def create_kv_caches(
     for _ in range(num_layers):
         value_cache = torch.empty(size=value_cache_shape,
                                   dtype=dtype,
-                                  device='cuda')
+                                  device=device)
         value_cache.uniform_(-scale, scale)
         value_caches.append(value_cache)
     return key_caches, value_caches

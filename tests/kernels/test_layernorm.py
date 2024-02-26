@@ -2,6 +2,7 @@ import pytest
 import torch
 
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.utils import is_hpu
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 83, 4096]  # Arbitrary values for testing
@@ -24,12 +25,18 @@ def test_rms_norm(
     seed: int,
 ) -> None:
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
 
-    layer = RMSNorm(hidden_size).to(dtype).cuda()
+    layer = RMSNorm(hidden_size).to(dtype)
+    if not is_hpu():
+        layer = layer.cuda()
     layer.weight.data.normal_(mean=1.0, std=0.1)
     scale = 1 / (2 * hidden_size)
-    x = torch.randn(num_tokens, hidden_size, dtype=dtype, device="cuda")
+    device = "hpu" if is_hpu() else "cuda"
+    x = torch.randn(num_tokens, hidden_size, dtype=dtype, device=device)
     x *= scale
     residual = torch.randn_like(x) * scale if add_residual else None
 

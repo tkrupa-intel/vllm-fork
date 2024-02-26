@@ -92,10 +92,11 @@ class ScaledActivation(nn.Module):
             intermediate_size_per_partition = intermediate_size
         if params_dtype is None:
             params_dtype = torch.get_default_dtype()
+        device = "hpu" if is_hpu() else "cuda"
         self.scales = nn.Parameter(
             torch.empty(intermediate_size_per_partition,
                         dtype=params_dtype,
-                        device="cuda"))
+                        device=device))
         set_weight_attrs(self.scales, {"weight_loader": self.weight_loader})
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

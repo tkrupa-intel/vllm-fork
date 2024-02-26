@@ -54,7 +54,8 @@ class PagedAttention(nn.Module):
         self.num_kv_heads = num_heads if num_kv_heads is None else num_kv_heads
         self.sliding_window = sliding_window
         if alibi_slopes is not None:
-            alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
+            device = "hpu" if is_hpu() else "cuda"
+            alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32, device=device)
         self.register_buffer("alibi_slopes", alibi_slopes, persistent=False)
 
         assert self.num_heads % self.num_kv_heads == 0
@@ -208,7 +209,8 @@ def _make_alibi_bias(
     seq_len: int,
     dtype: torch.dtype,
 ) -> LowerTriangularMaskWithTensorBias:
-    bias = torch.arange(seq_len, dtype=dtype, device="cuda")
+    device = "hpu" if is_hpu() else "cuda"
+    bias = torch.arange(seq_len, dtype=dtype, device=device)
     # NOTE(zhuohan): HF uses
     #     `bias = bias[None, :].repeat(prompt_len, 1)`
     # here. We find that both biases give the same results, but

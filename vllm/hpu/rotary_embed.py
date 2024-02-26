@@ -71,14 +71,14 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
 
 
 class HpuRotaryEmbedding(nn.Module):
-    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=None, device='cuda'):
+    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=None, device='hpu'):
         super().__init__()
 
         self.head_size = head_size
         self.dim = rotary_dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
-        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
+        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2, device=device).float() / self.dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
         # Build here to make `torch.jit.trace` work.

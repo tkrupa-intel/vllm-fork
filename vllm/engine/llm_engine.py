@@ -17,7 +17,7 @@ from vllm.sequence import (SamplerOutput, Sequence, SequenceGroup,
                            SequenceOutput, SequenceStatus)
 from vllm.transformers_utils.tokenizer import (detokenize_incrementally,
                                                get_tokenizer)
-from vllm.utils import Counter
+from vllm.utils import Counter, is_hpu
 
 if ray:
     from ray.air.util.torch_dist import init_torch_dist_process_group
@@ -175,7 +175,8 @@ class LLMEngine:
             self.workers.append(worker)
 
         # Initialize torch distributed process group for the workers.
-        init_torch_dist_process_group(self.workers, backend="nccl")
+        torch_dist_backend = 'hccl' if is_hpu() else 'nccl'
+        init_torch_dist_process_group(self.workers, backend=torch_dist_backend)
         model_config = copy.deepcopy(self.model_config)
         parallel_config = copy.deepcopy(self.parallel_config)
         scheduler_config = copy.deepcopy(self.scheduler_config)

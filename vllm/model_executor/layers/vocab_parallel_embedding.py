@@ -12,6 +12,7 @@ from vllm.model_executor.parallel_utils.utils import divide
 from vllm.model_executor.parallel_utils.communication_op import (
     tensor_model_parallel_all_reduce)
 from vllm.model_executor.utils import set_weight_attrs
+from vllm.utils import is_hpu
 
 
 def pad_vocab_size(vocab_size: int, pad_to: int = 64) -> int:
@@ -65,10 +66,11 @@ class VocabParallelEmbedding(torch.nn.Module):
                 self.tp_size))
         self.num_embeddings_per_partition = (self.vocab_end_index -
                                              self.vocab_start_index)
+        device_idx = f"hpu:{torch.hpu.current_device()}" if is_hpu() else f"cuda:{torch.cuda.current_device()}"
         self.weight = Parameter(
             torch.empty(self.num_embeddings_per_partition,
                         self.embedding_dim,
-                        device=torch.cuda.current_device(),
+                        device=device_idx,
                         dtype=params_dtype))
         set_weight_attrs(self.weight, {
             "parallel_dim": 0,
@@ -123,9 +125,10 @@ class ParallelLMHead(VocabParallelEmbedding):
                  params_dtype: Optional[torch.dtype] = None):
         super().__init__(num_embeddings, embedding_dim, params_dtype)
         if bias:
+            device_idx = f"hpu:{torch.hpu.current_device()}" if is_hpu() else f"cuda:{torch.cuda.current_device()}"
             self.bias = Parameter(
                 torch.empty(self.num_embeddings_per_partition,
-                            device=torch.cuda.current_device(),
+                            device=device_idx,
                             dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "parallel_dim": 0,

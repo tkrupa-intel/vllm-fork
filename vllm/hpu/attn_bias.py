@@ -143,7 +143,7 @@ class _SeqLenInfo:
             min_seqlen = min(min_seqlen, seqlen) if min_seqlen != -1 else seqlen
             max_seqlen = max(max_seqlen, seqlen)
             seqstart_py.append(seqstart_py[len(seqstart_py) - 1] + seqlen)
-        seqstart = torch.tensor(seqstart_py, dtype=torch.int32)
+        seqstart = torch.tensor(seqstart_py, dtype=torch.int32, device="hpu")
         return cls(
             max_seqlen=max_seqlen,
             min_seqlen=min_seqlen,
@@ -247,11 +247,11 @@ class _PaddedSeqLenInfo(_SeqLenInfo):
         assert all(seqlen <= padding for seqlen in seqlens)
         seqstart_py = list(range(0, len(seqlens) * padding + 1, padding))
         return cls(
-            seqlen=torch.tensor(seqlens, dtype=torch.int32),
+            seqlen=torch.tensor(seqlens, dtype=torch.int32, device="hpu"),
             seqlen_py=seqlens,
             max_seqlen=max(seqlens),
             min_seqlen=min(seqlens),
-            seqstart=torch.tensor(seqstart_py, dtype=torch.int32),
+            seqstart=torch.tensor(seqstart_py, dtype=torch.int32, device="hpu"),
             seqstart_py=seqstart_py,
             padding=padding,
         )

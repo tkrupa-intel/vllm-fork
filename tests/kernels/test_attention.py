@@ -6,8 +6,6 @@ import torch
 
 from vllm.utils import get_max_shared_memory_bytes, is_hpu
 if is_hpu():
-    import habana_frameworks.torch.core as htcore
-    import habana_frameworks.torch.gpu_migration
     from vllm.hpu import ops
     from vllm.hpu import xops
     from vllm.hpu.attn_bias import BlockDiagonalCausalMask
@@ -131,7 +129,12 @@ def test_paged_attention(
 ) -> None:
     random.seed(seed)
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
+
+    device = "hpu" if is_hpu() else "cuda"
 
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
@@ -139,7 +142,7 @@ def test_paged_attention(
                         num_query_heads,
                         head_size,
                         dtype=dtype,
-                        device="cuda")
+                        device=device)
     query.uniform_(-scale, scale)
 
     assert num_query_heads % num_kv_heads == 0
@@ -148,12 +151,12 @@ def test_paged_attention(
     if use_alibi:
         alibi_slopes = torch.randn(num_query_heads,
                                    dtype=torch.float,
-                                   device="cuda")
+                                   device=device)
 
     context_lens = [random.randint(1, MAX_SEQ_LEN) for _ in range(num_seqs)]
     context_lens[-1] = MAX_SEQ_LEN
     max_context_len = max(context_lens)
-    context_lens = torch.tensor(context_lens, dtype=torch.int, device="cuda")
+    context_lens = torch.tensor(context_lens, dtype=torch.int, device=device)
 
     # Create the block tables.
     max_num_blocks_per_seq = (max_context_len + block_size - 1) // block_size
@@ -164,7 +167,7 @@ def test_paged_attention(
             for _ in range(max_num_blocks_per_seq)
         ]
         block_tables.append(block_table)
-    block_tables = torch.tensor(block_tables, dtype=torch.int, device="cuda")
+    block_tables = torch.tensor(block_tables, dtype=torch.int, device=device)
 
     # Create the KV caches.
     key_caches, value_caches = kv_cache_factory(NUM_BLOCKS, block_size, 1,
@@ -267,6 +270,7 @@ def ref_multi_query_kv_attention(
 ) -> torch.Tensor:
     num_seqs = len(cu_seq_lens) - 1
     ref_outputs = []
+    device = "hpu" if is_hpu() else "cuda"
     for i in range(num_seqs):
         start_idx = cu_seq_lens[i]
         end_idx = cu_seq_lens[i + 1]
@@ -276,7 +280,7 @@ def ref_multi_query_kv_attention(
         attn_mask = torch.triu(torch.ones(seq_len, seq_len, dtype=dtype),
                                diagonal=1)
         attn_mask = attn_mask * torch.finfo(dtype).min
-        attn_mask = attn_mask.to(dtype=dtype, device="cuda")
+        attn_mask = attn_mask.to(dtype=dtype, device=device)
 
         ref_output = ref_masked_attention(
             query[start_idx:end_idx],
@@ -306,7 +310,12 @@ def test_multi_query_kv_attention(
 ) -> None:
     random.seed(seed)
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
+
+    device = "hpu" if is_hpu() else "cuda"
 
     # MAX_SEQ_LEN sometimes causes OOM in the reference implementation.
     # As the xformers library is already tested with its own tests, we can use
@@ -321,7 +330,7 @@ def test_multi_query_kv_attention(
                       num_query_heads + 2 * num_kv_heads,
                       head_size,
                       dtype=dtype,
-                      device="cuda")
+                      device=device)
     qkv.uniform_(-scale, scale)
     query, key, value = qkv.split(
         [num_query_heads, num_kv_heads, num_kv_heads], dim=1)

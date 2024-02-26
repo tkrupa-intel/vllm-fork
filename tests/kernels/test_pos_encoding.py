@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from vllm.model_executor.layers.rotary_embedding import get_rope
+from vllm.utils import is_hpu
 
 IS_NEOX_STYLE = [True, False]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
@@ -39,21 +40,27 @@ def test_rotary_embedding(
     if rotary_dim is None:
         rotary_dim = head_size
     torch.random.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
+    if is_hpu():
+        torch.hpu.random.manual_seed(seed)
+    else:
+        torch.cuda.manual_seed(seed)
 
     if rotary_dim is None:
         rotary_dim = head_size
     rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
-    rope = rope.to(dtype).cuda()
+    rope = rope.to(dtype)
+    if not is_hpu():
+        rope = rope.cuda()
 
+    device = "hpu" if is_hpu() else "cuda"
     positions = torch.randint(0,
                               max_position, (batch_size, seq_len),
-                              device="cuda")
+                              device=device)
     query = torch.randn(batch_size,
                         seq_len,
                         num_heads * head_size,
                         dtype=dtype,
-                        device="cuda")
+                        device=device)
     key = torch.randn_like(query)
 
     # NOTE(woosuk): The reference implementation should be executed first

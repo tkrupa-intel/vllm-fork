@@ -9,6 +9,7 @@ from vllm.model_executor.layers.sampler import Sampler
 from vllm.model_executor.utils import set_random_seed
 from vllm.sequence import SamplingParams, SequenceData, SequenceGroupMetadata
 from vllm.worker.model_runner import ModelRunner
+from vllm.utils import is_hpu
 
 
 class MockLogitsSampler(Sampler):
@@ -29,8 +30,9 @@ def _prepare_test(
     batch_size: int
 ) -> Tuple[torch.Tensor, torch.Tensor, MockLogitsSampler, ModelRunner]:
     vocab_size = 32000
+    device = "hpu" if is_hpu() else "cuda"
     input_tensor = torch.rand((batch_size, 1024),
-                              device="cuda",
+                              device=device,
                               dtype=torch.float16)
     fake_logits = torch.full((batch_size, vocab_size),
                              1e-2,

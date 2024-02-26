@@ -52,10 +52,18 @@ class CacheEngine:
         self.cpu_cache = self.allocate_cpu_cache()
 
         # Initialize the stream for caching operations.
-        self.cache_stream = torch.cuda.Stream()
-        assert self.cache_stream != torch.cuda.current_stream()
+        if is_hpu():
+            self.cache_stream = torch.hpu.Stream()
+            assert self.cache_stream != torch.hpu.current_stream()
+        else:
+            self.cache_stream = torch.cuda.Stream()
+            assert self.cache_stream != torch.cuda.current_stream()
+
         # Initialize the events for stream synchronization.
-        self.events = [torch.cuda.Event() for _ in range(self.num_layers)]
+        if is_hpu():
+            self.events = [torch.hpu.Event() for _ in range(self.num_layers)]
+        else:
+            self.events = [torch.cuda.Event() for _ in range(self.num_layers)]
 
     def get_key_block_shape(self) -> Tuple[int, int, int, int]:
         element_size = torch.tensor([], dtype=self.dtype).element_size()
@@ -145,7 +153,13 @@ class CacheEngine:
         dst: List[KVCache],
         src_to_dst: Dict[int, int],
     ) -> None:
-        with torch.cuda.stream(self.cache_stream):
+
+        def get_stream():
+            if is_hpu():
+                return torch.hpu.stream(self.cache_stream)
+            return torch.cuda.stream(self.cache_stream)
+
+        with get_stream():
             for i in range(self.num_layers):
                 src_key_cache, src_value_cache = src[i]
                 dst_key_cache, dst_value_cache = dst[i]

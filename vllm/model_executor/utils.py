@@ -4,13 +4,16 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
+from vllm.utils import is_hpu
 
 
 def set_random_seed(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
+    if is_hpu():
+        torch.hpu.random.manual_seed_all(seed)
+    elif torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
 

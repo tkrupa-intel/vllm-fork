@@ -10,6 +10,7 @@ from vllm.config import ModelConfig
 from vllm.model_executor.models import ModelRegistry
 from vllm.model_executor.weight_utils import (get_quant_config,
                                               initialize_dummy_weights)
+from vllm.utils import is_hpu
 
 
 @contextlib.contextmanager
@@ -61,8 +62,12 @@ def get_model(model_config: ModelConfig) -> nn.Module:
     with _set_default_torch_dtype(model_config.dtype):
         # Create a model instance.
         # The weights will be initialized as empty tensors.
-        with torch.device("cuda"):
-            model = model_class(model_config.hf_config, linear_method)
+        if is_hpu():
+            with torch.device("hpu"):
+                model = model_class(model_config.hf_config, linear_method)
+        else:
+            with torch.device("cuda"):
+                model = model_class(model_config.hf_config, linear_method)
         if model_config.load_format == "dummy":
             # NOTE(woosuk): For accurate performance evaluation, we assign
             # random values to the weights.
