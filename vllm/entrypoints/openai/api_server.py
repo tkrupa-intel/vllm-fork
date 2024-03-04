@@ -7,6 +7,16 @@ import importlib
 import inspect
 
 from prometheus_client import make_asgi_app
+import time
+from http import HTTPStatus
+from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
+import torch
+from vllm.utils import is_hpu
+if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
+from aioprometheus import MetricsMiddleware
+from aioprometheus.asgi.starlette import metrics
 import fastapi
 import uvicorn
 from http import HTTPStatus

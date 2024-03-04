@@ -4,9 +4,11 @@ import pytest
 import torch
 
 from typing import Tuple
-
-from vllm._C import cache_ops
-from vllm.utils import is_hip
+from vllm.utils import is_hpu, is_hip
+if is_hpu():
+    from vllm.hpu import cache_ops
+else:
+    from vllm._C import cache_ops
 
 COPYING_DIRECTION = [('cuda', 'cpu'), ('cuda', 'cuda'), ('cpu', 'cuda')]
 DTYPES = [torch.half, torch.bfloat16, torch.float]

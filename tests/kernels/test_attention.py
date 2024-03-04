@@ -3,13 +3,19 @@ from typing import List, Optional, Tuple
 
 import pytest
 import torch
-from xformers import ops as xops
-from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
 
-from vllm._C import ops, cache_ops
-from vllm.utils import get_max_shared_memory_bytes
-from vllm.utils import is_hip
 from allclose_default import get_default_atol, get_default_rtol
+from vllm.utils import get_max_shared_memory_bytes, is_hip, is_hpu
+if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
+    from vllm.hpu import ops, cache_ops
+    from vllm.hpu import xops
+    from vllm.hpu.attn_bias import BlockDiagonalCausalMask
+else:
+    from vllm._C import ops, cache_ops
+    from xformers import ops as xops
+    from xformers.ops.fmha.attn_bias import BlockDiagonalCausalMask
 
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 # This will change depending on the compute capability.
@@ -19,6 +25,10 @@ MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 4321  # Arbitrary values for testing
 PARTITION_SIZE = 512
+
+VERSION = ["v1", "v2"]
+if is_hpu():
+    VERSION.pop()
 # flshattF and tritonflashattF supported: {torch.float16, torch.bfloat16}
 DTYPES = [torch.half, torch.bfloat16, torch.float
           ] if not is_hip() else [torch.half, torch.bfloat16]
@@ -85,8 +95,11 @@ def ref_single_query_cached_kv_attention(
             block_number = int(block_table[j // block_size])
             block_offset = j % block_size
 
-            k = key_cache[block_number, :, :, block_offset, :]
-            k = k.reshape(num_kv_heads, head_size)
+            if is_hpu():
+                k = key_cache[block_number, :, :, block_offset]
+            else:
+                k = key_cache[block_number, :, :, block_offset, :]
+                k = k.reshape(num_kv_heads, head_size)
             keys.append(k)
 
             v = value_cache[block_number, :, :, block_offset]
@@ -111,7 +124,7 @@ def ref_single_query_cached_kv_attention(
         output[i].copy_(out, non_blocking=True)
 
 
-@pytest.mark.parametrize("version", ["v1", "v2"])
+@pytest.mark.parametrize("version", VERSION)
 @pytest.mark.parametrize("num_seqs", NUM_GEN_SEQS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -175,40 +188,8 @@ def test_paged_attention(
 
     # Call the paged attention kernel.
     output = torch.empty_like(query)
-    if version == "v1":
-        ops.paged_attention_v1(
-            output,
-            query,
-            key_cache,
-            value_cache,
-            num_kv_heads,
-            scale,
-            block_tables,
-            context_lens,
-            block_size,
-            max_context_len,
-            alibi_slopes,
-            kv_cache_dtype,
-        )
-    elif version == "v2":
-        num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
-                          PARTITION_SIZE)
-        assert PARTITION_SIZE % block_size == 0
-        num_seqs, num_heads, head_size = output.shape
-        tmp_output = torch.empty(
-            size=(num_seqs, num_heads, num_partitions, head_size),
-            dtype=output.dtype,
-        )
-        exp_sums = torch.empty(
-            size=(num_seqs, num_heads, num_partitions),
-            dtype=torch.float32,
-        )
-        max_logits = torch.empty_like(exp_sums)
-        ops.paged_attention_v2(
-            output,
-            exp_sums,
-            max_logits,
-            tmp_output,
+    if is_hpu():
+        output = ops.paged_attention_v1(
             query,
             key_cache,
             value_cache,
@@ -222,7 +203,54 @@ def test_paged_attention(
             kv_cache_dtype,
         )
     else:
-        raise AssertionError(f"Unknown version: {version}")
+        if version == "v1":
+            ops.paged_attention_v1(
+                output,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+                kv_cache_dtype,
+            )
+        elif version == "v2":
+            num_partitions = ((max_context_len + PARTITION_SIZE - 1) //
+                            PARTITION_SIZE)
+            assert PARTITION_SIZE % block_size == 0
+            num_seqs, num_heads, head_size = output.shape
+            tmp_output = torch.empty(
+                size=(num_seqs, num_heads, num_partitions, head_size),
+                dtype=output.dtype,
+            )
+            exp_sums = torch.empty(
+                size=(num_seqs, num_heads, num_partitions),
+                dtype=torch.float32,
+            )
+            max_logits = torch.empty_like(exp_sums)
+            ops.paged_attention_v2(
+                output,
+                exp_sums,
+                max_logits,
+                tmp_output,
+                query,
+                key_cache,
+                value_cache,
+                num_kv_heads,
+                scale,
+                block_tables,
+                context_lens,
+                block_size,
+                max_context_len,
+                alibi_slopes,
+                kv_cache_dtype,
+            )
+        else:
+            raise AssertionError(f"Unknown version: {version}")
 
     # Run the reference implementation.
     if kv_cache_dtype == "fp8_e5m2":
@@ -346,19 +374,31 @@ def test_multi_query_kv_attention(
         key = torch.repeat_interleave(key, num_queries_per_kv, dim=1)
         value = torch.repeat_interleave(value, num_queries_per_kv, dim=1)
     attn_bias = BlockDiagonalCausalMask.from_seqlens(seq_lens)
-    output = xops.memory_efficient_attention_forward(
-        query.unsqueeze(0),
-        key.unsqueeze(0),
-        value.unsqueeze(0),
-        attn_bias=attn_bias,
-        p=0.0,
-        scale=scale,
-    )
-    output = output.squeeze(0)
-
     cu_seq_lens = [0]
     for seq_len in seq_lens:
         cu_seq_lens.append(cu_seq_lens[-1] + seq_len)
+    
+    if is_hpu():
+        output = xops.memory_efficient_attention_forward(
+            query.unsqueeze(0),
+            key.unsqueeze(0),
+            value.unsqueeze(0),
+            cu_seq_lens,
+            attn_bias=attn_bias,
+            p=0.0,
+            scale=scale,
+        )        
+    else:
+        output = xops.memory_efficient_attention_forward(
+            query.unsqueeze(0),
+            key.unsqueeze(0),
+            value.unsqueeze(0),
+            attn_bias=attn_bias,
+            p=0.0,
+            scale=scale,
+        )
+    output = output.squeeze(0)
+
     ref_output = ref_multi_query_kv_attention(
         cu_seq_lens,
         query,

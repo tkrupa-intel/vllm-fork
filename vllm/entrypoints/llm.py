@@ -9,7 +9,9 @@ from vllm.engine.llm_engine import LLMEngine
 from vllm.outputs import RequestOutput
 from vllm.sampling_params import SamplingParams
 from vllm.utils import Counter
+from vllm.utils import is_hpu
 
+import torch
 
 class LLM:
     """An LLM for generating texts from given prompts and sampling parameters.
@@ -197,11 +199,23 @@ class LLM:
                                     lora_request=lora_request,
                                     prefix_pos=prefix_pos)
 
-    def _run_engine(self, use_tqdm: bool) -> List[RequestOutput]:
+    def _run_engine(self, use_tqdm: bool, profiling: bool = False) -> List[RequestOutput]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
             pbar = tqdm(total=num_requests, desc="Processed prompts")
+        
+        if profiling and is_hpu():
+            prof = torch.profiler.profile(
+                schedule = torch.profiler.schedule(wait=6, warmup=0, active=2, repeat=1),
+                activities = [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.HPU],
+                with_stack = True,
+                record_shapes = False,
+                on_trace_ready = torch.profiler.tensorboard_trace_handler("./", use_gzip = True)
+            )
+            prof.start()
+            count = 0
+
         # Run the engine.
         outputs: List[RequestOutput] = []
         while self.llm_engine.has_unfinished_requests():
@@ -211,6 +225,12 @@ class LLM:
                     outputs.append(output)
                     if use_tqdm:
                         pbar.update(1)
+            if profiling and is_hpu():
+                htorch.core.mark_step()
+                prof.step()
+        if profiling and is_hpu():
+            htorch.hpu.synchronize()
+            prof.stop()
         if use_tqdm:
             pbar.close()
         # Sort the outputs by request ID.

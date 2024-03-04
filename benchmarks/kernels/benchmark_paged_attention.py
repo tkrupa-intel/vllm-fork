@@ -5,8 +5,12 @@ import time
 
 import torch
 
-from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, create_kv_caches_with_random
+from vllm.utils import STR_DTYPE_TO_TORCH_DTYPE, create_kv_caches_with_random, is_hpu
 from vllm._C import ops
+if is_hpu():
+    from vllm.hpu import ops
+else:
+    from vllm._C import ops
 
 NUM_BLOCKS = 1024
 PARTITION_SIZE = 512

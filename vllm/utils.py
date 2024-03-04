@@ -3,6 +3,7 @@ import os
 import socket
 import subprocess
 import uuid
+import importlib
 from platform import uname
 from typing import List, Tuple, Union
 from packaging.version import parse, Version
@@ -30,7 +31,6 @@ STR_DTYPE_TO_TORCH_DTYPE = {
     "float": torch.float,
     "fp8_e5m2": torch.uint8,
 }
-
 
 class Device(enum.Enum):
     GPU = enum.auto()
@@ -116,6 +116,16 @@ class LRUCache:
 
 def is_hip() -> bool:
     return torch.version.hip is not None
+
+
+def is_hpu() -> bool:
+    return importlib.util.find_spec('habana_frameworks') is not None
+
+
+if is_hpu():
+    from vllm.hpu import cuda_utils
+else:
+    from vllm._C import cuda_utils
 
 
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:

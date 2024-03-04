@@ -27,6 +27,10 @@ from typing import AsyncGenerator, List, Tuple
 import numpy as np
 from tqdm.asyncio import tqdm
 from transformers import PreTrainedTokenizerBase
+import torch
+from vllm.utils import is_hpu
+if is_hpu():
+    import habana_frameworks.torch as htorch
 from vllm.transformers_utils.tokenizer import get_tokenizer
 
 from backend_request_func import (
