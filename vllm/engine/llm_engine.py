@@ -172,7 +172,7 @@ class LLMEngine:
             worker = ray.remote(
                 num_cpus=0,
                 num_gpus=num_gpus if not is_hpu() else 0,
-                resources={'HPU': num_gpus} if is_hpu else {},
+                resources={'HPU': num_gpus} if is_hpu() else {},
                 scheduling_strategy=PlacementGroupSchedulingStrategy(
                     placement_group=placement_group,
                     placement_group_capture_child_tasks=True),
