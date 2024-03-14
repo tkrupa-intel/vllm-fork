@@ -10,7 +10,7 @@ import torch
 import habana_frameworks.torch as htorch
 
 
-def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, is_prompt=False):
+def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, kv_cache_dtype, is_prompt=False):
     """
     key: [num_tokens, num_heads, head_size]
     value: [num_tokens, num_heads, head_size]

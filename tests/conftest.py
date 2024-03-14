@@ -12,23 +12,22 @@ from transformers import AutoModelForCausalLM
 from vllm import LLM, SamplingParams
 from vllm.transformers_utils.tokenizer import get_tokenizer
 
-_TEST_PROMPTS = ["prompts/example.txt"]
-_LONG_PROMPTS = ["prompts/summary.txt"]
+_TEST_DIR = os.path.dirname(__file__)
+_TEST_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "example.txt")]
+_LONG_PROMPTS = [os.path.join(_TEST_DIR, "prompts", "summary.txt")]
 
 
-def _read_prompts(filename: str) -> str:
-    prompts = []
+def _read_prompts(filename: str) -> List[str]:
     with open(filename, "r") as f:
-        prompt = f.readline()
-        prompts.append(prompt)
-    return prompts
+        prompts = f.readlines()
+        return prompts
 
 
 @pytest.fixture
 def example_prompts() -> List[str]:
     prompts = []
     for filename in _TEST_PROMPTS:
-        prompts += _read_prompts(os.path.join("tests", filename))
+        prompts += _read_prompts(filename)
     return prompts
 
 
@@ -36,7 +35,7 @@ def example_prompts() -> List[str]:
 def example_long_prompts() -> List[str]:
     prompts = []
     for filename in _LONG_PROMPTS:
-        prompts += _read_prompts(os.path.join("tests", filename))
+        prompts += _read_prompts(filename)
     return prompts
 
 
@@ -181,6 +180,9 @@ class VllmRunner:
         model_name: str,
         tokenizer_name: Optional[str] = None,
         dtype: str = "half",
+        disable_log_stats: bool = True,
+        tensor_parallel_size: int = 1,
+        **kwargs,
     ) -> None:
         self.model = LLM(
             model=model_name,
@@ -188,6 +190,9 @@ class VllmRunner:
             trust_remote_code=True,
             dtype=dtype,
             swap_space=0,
+            disable_log_stats=disable_log_stats,
+            tensor_parallel_size=tensor_parallel_size,
+            **kwargs,
         )
 
     def generate(

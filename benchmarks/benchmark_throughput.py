@@ -74,6 +74,8 @@ def run_vllm(
     dtype: str,
     max_model_len: Optional[int],
     enforce_eager: bool,
+    kv_cache_dtype: str,
+    device: str,
     profiling: bool = False, # For Gaudi2
 ) -> float:
     from vllm import LLM, SamplingParams
@@ -87,6 +89,8 @@ def run_vllm(
         dtype=dtype,
         max_model_len=max_model_len,
         enforce_eager=enforce_eager,
+        kv_cache_dtype=kv_cache_dtype,
+        device=device,
     )
 
     # Add the requests to the engine.
@@ -211,6 +215,7 @@ def main(args: argparse.Namespace):
                                 args.seed, args.n, args.use_beam_search,
                                 args.trust_remote_code, args.dtype,
                                 args.max_model_len, args.enforce_eager,
+                                args.kv_cache_dtype, args.device,
                                 args.profiling)
     elif args.backend == "hf":
         assert args.tensor_parallel_size == 1
@@ -289,6 +294,19 @@ if __name__ == "__main__":
     parser.add_argument("--enforce-eager",
                         action="store_true",
                         help="enforce eager execution")
+    parser.add_argument(
+        "--kv-cache-dtype",
+        type=str,
+        choices=["auto", "fp8_e5m2"],
+        default="auto",
+        help=
+        'Data type for kv cache storage. If "auto", will use model data type.')
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        choices=["cuda"],
+        help='device type for vLLM execution, supporting CUDA only currently.')
     parser.add_argument("--profiling", action='store_true', help='Profiling first 4 steps')
     args = parser.parse_args()
     if args.tokenizer is None:

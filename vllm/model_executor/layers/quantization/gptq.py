@@ -131,7 +131,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 input_size_per_partition // self.quant_config.pack_factor,
                 output_size_per_partition,
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -149,7 +148,6 @@ class GPTQLinearMethod(LinearMethodBase):
                     i // self.quant_config.group_size
                     for i in range(input_size_per_partition)
                 ],
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -160,7 +158,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 scale_and_zero_size,
                 output_size_per_partition // self.quant_config.pack_factor,
-                device="cuda",
                 dtype=torch.int32,
             ),
             requires_grad=False,
@@ -176,7 +173,6 @@ class GPTQLinearMethod(LinearMethodBase):
             torch.empty(
                 scale_and_zero_size,
                 output_size_per_partition,
-                device="cuda",
                 dtype=params_dtype,
             ),
             requires_grad=False,
