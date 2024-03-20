@@ -29,7 +29,8 @@ class RMSNorm(nn.Module):
         eps: float = 1e-6,
     ) -> None:
         super().__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        device = "hpu" if is_hpu() else "cuda"
+        self.weight = nn.Parameter(torch.ones(hidden_size, device=device))
         self.variance_epsilon = eps
 
     def _forward(

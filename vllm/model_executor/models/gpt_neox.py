@@ -24,7 +24,7 @@ from transformers import GPTNeoXConfig
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import get_act_fn
-from vllm.model_executor.layers.attention import PagedAttention
+from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                LinearMethodBase,
                                                QKVParallelLinear,
@@ -54,6 +54,7 @@ class GPTNeoXAttention(nn.Module):
         self.total_num_heads = config.num_attention_heads
         self.hidden_size = config.hidden_size
         self.head_size = self.hidden_size // self.total_num_heads
+        self.bias = getattr(config, "attention_bias", True)
 
         tensor_model_parallel_world_size = (
             get_tensor_model_parallel_world_size())
@@ -65,11 +66,13 @@ class GPTNeoXAttention(nn.Module):
             config.hidden_size,
             self.head_size,
             self.total_num_heads,
+            bias=self.bias,
             linear_method=linear_method,
         )
         self.dense = RowParallelLinear(
             config.hidden_size,
             config.hidden_size,
+            bias=self.bias,
             linear_method=linear_method,
         )
         scaling = self.head_size**-0.5
@@ -84,7 +87,7 @@ class GPTNeoXAttention(nn.Module):
             max_position=max_position_embeddings,
             base=rope_theta,
         )
-        self.attn = PagedAttention(self.num_heads, self.head_size, scaling)
+        self.attn = Attention(self.num_heads, self.head_size, scaling)
 
     def forward(
         self,
@@ -252,7 +255,7 @@ class GPTNeoXForCausalLM(nn.Module):
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(self.embed_out.weight, hidden_states,
                                    sampling_metadata)
         return next_tokens

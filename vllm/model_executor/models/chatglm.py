@@ -10,7 +10,7 @@ from torch.nn import LayerNorm
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import SiluAndMul
-from vllm.model_executor.layers.attention import PagedAttention
+from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.layernorm import RMSNorm
 from vllm.model_executor.layers.linear import (LinearMethodBase,
                                                MergedColumnParallelLinear,
@@ -87,7 +87,7 @@ class GLMAttention(nn.Module):
             base=10000 * rope_ratio,
             is_neox_style=False,
         )
-        self.attn = PagedAttention(
+        self.attn = Attention(
             self.num_heads,
             self.head_dim,
             self.scaling,
@@ -349,7 +349,7 @@ class ChatGLMForCausalLM(nn.Module):
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(self.lm_head_weight, hidden_states,
                                    sampling_metadata)
         return next_tokens

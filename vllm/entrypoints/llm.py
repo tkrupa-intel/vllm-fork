@@ -3,6 +3,7 @@ from typing import List, Optional, Union
 from tqdm import tqdm
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
+from vllm.lora.request import LoRARequest
 from vllm.engine.arg_utils import EngineArgs
 from vllm.engine.llm_engine import LLMEngine
 from vllm.outputs import RequestOutput
@@ -69,6 +70,7 @@ class LLM:
         max_context_len_to_capture: Maximum context len covered by CUDA graphs.
             When a sequence has context length larger than this, we fall back
             to eager mode.
+        disable_custom_all_reduce: See ParallelConfig
     """
 
     def __init__(
@@ -87,6 +89,7 @@ class LLM:
         swap_space: int = 4,
         enforce_eager: bool = False,
         max_context_len_to_capture: int = 8192,
+        disable_custom_all_reduce: bool = False,
         **kwargs,
     ) -> None:
         if "disable_log_stats" not in kwargs:
@@ -106,6 +109,7 @@ class LLM:
             swap_space=swap_space,
             enforce_eager=enforce_eager,
             max_context_len_to_capture=max_context_len_to_capture,
+            disable_custom_all_reduce=disable_custom_all_reduce,
             **kwargs,
         )
         self.llm_engine = LLMEngine.from_engine_args(engine_args)
@@ -113,13 +117,13 @@ class LLM:
 
     def get_tokenizer(
             self) -> Union[PreTrainedTokenizer, PreTrainedTokenizerFast]:
-        return self.llm_engine.tokenizer
+        return self.llm_engine.tokenizer.tokenizer
 
     def set_tokenizer(
         self,
         tokenizer: Union[PreTrainedTokenizer, PreTrainedTokenizerFast],
     ) -> None:
-        self.llm_engine.tokenizer = tokenizer
+        self.llm_engine.tokenizer.tokenizer = tokenizer
 
     def generate(
         self,
@@ -127,6 +131,7 @@ class LLM:
         sampling_params: Optional[SamplingParams] = None,
         prompt_token_ids: Optional[List[List[int]]] = None,
         use_tqdm: bool = True,
+        lora_request: Optional[LoRARequest] = None,
         profiling: bool = False,
     ) -> List[RequestOutput]:
         """Generates the completions for the input prompts.
@@ -142,6 +147,7 @@ class LLM:
             prompt_token_ids: A list of token IDs for the prompts. If None, we
                 use the tokenizer to convert the prompts to token IDs.
             use_tqdm: Whether to use tqdm to display the progress bar.
+            lora_request: LoRA request to use for generation, if any.
             profiling: Run generation with profiling enabled
 
         Returns:
@@ -169,7 +175,10 @@ class LLM:
             prompt = prompts[i] if prompts is not None else None
             token_ids = None if prompt_token_ids is None else prompt_token_ids[
                 i]
-            self._add_request(prompt, sampling_params, token_ids)
+            self._add_request(prompt,
+                              sampling_params,
+                              token_ids,
+                              lora_request=lora_request)
         return self._run_engine(use_tqdm, profiling=profiling)
 
     def _add_request(
@@ -177,16 +186,20 @@ class LLM:
         prompt: Optional[str],
         sampling_params: SamplingParams,
         prompt_token_ids: Optional[List[int]],
+        lora_request: Optional[LoRARequest] = None,
     ) -> None:
         request_id = str(next(self.request_counter))
-        self.llm_engine.add_request(request_id, prompt, sampling_params,
-                                    prompt_token_ids)
+        self.llm_engine.add_request(request_id,
+                                    prompt,
+                                    sampling_params,
+                                    prompt_token_ids,
+                                    lora_request=lora_request)
 
     def _run_engine(self, use_tqdm: bool, profiling: bool = False) -> List[RequestOutput]:
         # Initialize tqdm.
         if use_tqdm:
             num_requests = self.llm_engine.get_num_unfinished_requests()
-            pbar = tqdm(total=num_requests, desc="Processed prompts")
+            pbar = tqdm(total=num_requests, desc="Processed prompts", dynamic_ncols=True)
         
         if profiling:
             activities = [torch.profiler.ProfilerActivity.CPU]

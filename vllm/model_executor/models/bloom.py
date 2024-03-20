@@ -25,7 +25,7 @@ from transformers import BloomConfig
 
 from vllm.model_executor.input_metadata import InputMetadata
 from vllm.model_executor.layers.activation import get_act_fn
-from vllm.model_executor.layers.attention import PagedAttention
+from vllm.model_executor.layers.attention import Attention
 from vllm.model_executor.layers.linear import (ColumnParallelLinear,
                                                LinearMethodBase,
                                                QKVParallelLinear,
@@ -107,10 +107,10 @@ class BloomAttention(nn.Module):
         alibi_slopes = alibi_slopes[head_start:head_end].tolist()
 
         scaling = self.head_dim**-0.5
-        self.attn = PagedAttention(self.num_heads,
-                                   self.head_dim,
-                                   scaling,
-                                   alibi_slopes=alibi_slopes)
+        self.attn = Attention(self.num_heads,
+                              self.head_dim,
+                              scaling,
+                              alibi_slopes=alibi_slopes)
 
     def forward(
         self,
@@ -290,7 +290,7 @@ class BloomForCausalLM(nn.Module):
         self,
         hidden_states: torch.Tensor,
         sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
+    ) -> Optional[SamplerOutput]:
         next_tokens = self.sampler(self.lm_head_weight, hidden_states,
                                    sampling_metadata)
         return next_tokens

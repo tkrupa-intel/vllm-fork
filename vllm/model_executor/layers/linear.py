@@ -13,8 +13,17 @@ from vllm.model_executor.parallel_utils.utils import (
     divide, split_tensor_along_last_dim)
 from vllm.model_executor.utils import set_weight_attrs
 from vllm.logger import init_logger
+from vllm.utils import is_hpu
 
 logger = init_logger(__name__)
+
+
+def adjust_marlin_shard(param, shard_size, shard_offset):
+    marlin_tile_size = getattr(param, "marlin_tile_size", None)
+    if marlin_tile_size is None:
+        return shard_size, shard_offset
+
+    return shard_size * marlin_tile_size, shard_offset * marlin_tile_size
 
 
 class LinearMethodBase(ABC):
@@ -52,10 +61,11 @@ class UnquantizedLinearMethod(LinearMethodBase):
                        output_size_per_partition: int, input_size: int,
                        output_size: int,
                        params_dtype: torch.dtype) -> Dict[str, Any]:
+        device = "hpu" if is_hpu() else "cuda"
         weight = Parameter(torch.empty(output_size_per_partition,
                                        input_size_per_partition,
-                                       device=torch.cuda.current_device(),
-                                       dtype=params_dtype),
+                                       dtype=params_dtype,
+                                       device=device),
                            requires_grad=False)
         set_weight_attrs(weight, {"input_dim": 1, "output_dim": 0})
         return {"weight": weight}
@@ -66,7 +76,7 @@ class UnquantizedLinearMethod(LinearMethodBase):
                       bias: Optional[torch.Tensor] = None) -> torch.Tensor:
         weight = weights["weight"]
         if self.separate_bias_add:
-            if bias:
+            if bias is not None:
                 return F.linear(x, weight) + bias
             return F.linear(x, weight)
         return F.linear(x, weight, bias)
@@ -113,9 +123,7 @@ class ReplicatedLinear(torch.nn.Module):
                 self.register_parameter(name, weight)
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            device=torch.cuda.current_device(),
-                            dtype=self.params_dtype))
+                torch.empty(self.output_size, dtype=self.params_dtype))
             set_weight_attrs(self.bias, {"output_dim": 0})
         else:
             self.register_parameter("bias", None)
@@ -183,7 +191,6 @@ class ColumnParallelLinear(torch.nn.Module):
         if bias:
             self.bias = Parameter(
                 torch.empty(self.output_size_per_partition,
-                            device=torch.cuda.current_device(),
                             dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
@@ -280,6 +287,12 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
+
+                    # If marlin, we need to adjust the offset and size to
+                    # account for the tiling.
+                    shard_size, shard_offset = adjust_marlin_shard(
+                        param, shard_size, shard_offset)
+
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -297,6 +310,12 @@ class MergedColumnParallelLinear(ColumnParallelLinear):
             if packed_dim == output_dim:
                 shard_size = shard_size // param.pack_factor
                 shard_offset = shard_offset // param.pack_factor
+
+                # If marlin, we need to adjust the offset and size to
+                # account for the tiling.
+                shard_size, shard_offset = adjust_marlin_shard(
+                    param, shard_size, shard_offset)
+
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
             start_idx = tp_rank * shard_size
@@ -376,6 +395,7 @@ class QKVParallelLinear(ColumnParallelLinear):
                       loaded_shard_id: Optional[str] = None):
         param_data = param.data
         output_dim = getattr(param, "output_dim", None)
+
         if loaded_shard_id is None:
             # Loaded weight is already packed.
             if output_dim is None:
@@ -397,6 +417,12 @@ class QKVParallelLinear(ColumnParallelLinear):
                 if packed_dim == output_dim:
                     shard_size = shard_size // param.pack_factor
                     shard_offset = shard_offset // param.pack_factor
+
+                    # If marlin, we need to adjust the offset and size to
+                    # account for the tiling.
+                    shard_size, shard_offset = adjust_marlin_shard(
+                        param, shard_size, shard_offset)
+
                 loaded_weight_shard = loaded_weight.narrow(
                     output_dim, shard_offset, shard_size)
                 self.weight_loader(param, loaded_weight_shard, shard_id)
@@ -421,9 +447,18 @@ class QKVParallelLinear(ColumnParallelLinear):
             if packed_dim == output_dim:
                 shard_size = shard_size // param.pack_factor
                 shard_offset = shard_offset // param.pack_factor
+
+                # If marlin, we need to adjust the offset and size to
+                # account for the tiling.
+                shard_size, shard_offset = adjust_marlin_shard(
+                    param, shard_size, shard_offset)
+
             param_data = param_data.narrow(output_dim, shard_offset,
                                            shard_size)
-            shard_id = tp_rank // self.num_kv_head_replicas
+            if loaded_shard_id == "q":
+                shard_id = tp_rank
+            else:
+                shard_id = tp_rank // self.num_kv_head_replicas
             start_idx = shard_id * shard_size
             loaded_weight = loaded_weight.narrow(output_dim, start_idx,
                                                  shard_size)
@@ -506,9 +541,7 @@ class RowParallelLinear(torch.nn.Module):
 
         if bias:
             self.bias = Parameter(
-                torch.empty(self.output_size,
-                            device=torch.cuda.current_device(),
-                            dtype=params_dtype))
+                torch.empty(self.output_size, dtype=params_dtype))
             set_weight_attrs(self.bias, {
                 "output_dim": 0,
                 "weight_loader": self.weight_loader,

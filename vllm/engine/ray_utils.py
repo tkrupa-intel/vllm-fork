@@ -1,16 +1,17 @@
-from typing import Optional, Tuple, TYPE_CHECKING
+import pickle
+
+from typing import Optional, List, Tuple
 
 from vllm.config import ParallelConfig
 from vllm.logger import init_logger
-from vllm.utils import get_open_port, is_hip, is_hpu
+from vllm.utils import is_hip, is_hpu, set_cuda_visible_devices, get_ip
 
 logger = init_logger(__name__)
 
 try:
     import ray
-    from ray.air.util.torch_dist import TorchDistributedWorker
 
-    class RayWorkerVllm(TorchDistributedWorker):
+    class RayWorkerVllm:
         """Ray wrapper for vllm.worker.Worker, allowing Worker to be
         lazliy initialized after Ray sets CUDA_VISIBLE_DEVICES."""
 
@@ -19,6 +20,11 @@ try:
                 from transformers.dynamic_module_utils import init_hf_modules
                 init_hf_modules()
             self.worker = None
+            # Since the compiled DAG runs a main execution
+            # in a different thread that calls cuda.set_device.
+            # The flag indicates is set_device is called on
+            # that thread.
+            self.compiled_dag_cuda_device_set = False
 
         def init_worker(self, worker_init_fn):
             self.worker = worker_init_fn()
@@ -27,62 +33,83 @@ try:
             return getattr(self.worker, name)
 
         def execute_method(self, method, *args, **kwargs):
-            executor = getattr(self, method)
-            return executor(*args, **kwargs)
+            try:
+                executor = getattr(self, method)
+                return executor(*args, **kwargs)
+            except Exception as e:
+                # exceptions in ray worker may cause deadlock
+                # see https://github.com/vllm-project/vllm/issues/3455
+                # print the error and inform the user to solve the error
+                msg = (f"Error executing method {method}. "
+                       "This might cause deadlock in distributed execution.")
+                logger.exception(msg)
+                raise e
+
+        def get_node_ip(self) -> str:
+            return get_ip()
+
+        def get_node_and_gpu_ids(self) -> Tuple[str, List[int]]:
+            node_id = ray.get_runtime_context().get_node_id()
+            gpu_ids = ray.get_gpu_ids()
+            return node_id, gpu_ids
+
+        def set_cuda_visible_devices(self, device_ids) -> None:
+            set_cuda_visible_devices(device_ids)
+
+        def execute_model_compiled_dag_remote(self, ignored):
+            """Used only when compiled DAG is enabled."""
+            import torch
+            if not self.compiled_dag_cuda_device_set:
+                torch.cuda.set_device(self.worker.device)
+                self.compiled_dag_cuda_device_set = True
+
+            output = self.worker.execute_model()
+            output = pickle.dumps(output)
+            return output
 
 except ImportError as e:
     logger.warning(f"Failed to import Ray with {e!r}. "
                    "For distributed inference, please install Ray with "
-                   "`pip install ray pandas pyarrow`.")
+                   "`pip install ray`.")
     ray = None
-    TorchDistributedWorker = None
     RayWorkerVllm = None
 
-if TYPE_CHECKING:
-    from ray.util.placement_group import PlacementGroup
 
-
-def initialize_cluster(
+def initialize_ray_cluster(
     parallel_config: ParallelConfig,
-    engine_use_ray: bool = False,
     ray_address: Optional[str] = None,
-) -> Tuple[str, Optional["PlacementGroup"]]:
-    """Initialize the distributed cluster probably with Ray.
+):
+    """Initialize the distributed cluster with Ray.
+
+    it will connect to the Ray cluster and create a placement group
+    for the workers, which includes the specification of the resources
+    for each distributed worker.
 
     Args:
         parallel_config: The configurations for parallel execution.
-        engine_use_ray: Whether to use Ray for async engine.
         ray_address: The address of the Ray cluster. If None, uses
             the default Ray cluster address.
-
-    Returns:
-        A tuple of (`distributed_init_method`, `placement_group`). The
-        `distributed_init_method` is the address for initializing the
-        distributed backend. `placement_group` includes the specification
-        of the resources for each distributed worker.
     """
-    if parallel_config.worker_use_ray or engine_use_ray:
-        if ray is None:
-            raise ImportError(
-                "Ray is not installed. Please install Ray to use distributed "
-                "serving.")
-        # Connect to a ray cluster.
-        if is_hip():
-            ray.init(address=ray_address,
-                     ignore_reinit_error=True,
-                     num_gpus=parallel_config.world_size)
-        else:
-            ray.init(address=ray_address, ignore_reinit_error=True)
-        ray_accel_name = "HPU" if is_hpu() else "GPU"
+    if ray is None:
+        raise ImportError(
+            "Ray is not installed. Please install Ray to use distributed "
+            "serving.")
 
-    if not parallel_config.worker_use_ray:
-        # Initialize cluster locally.
-        port = get_open_port()
-        # We need to setup the distributed init method to make sure
-        # the distributed megatron code (e.g., get world size) works correctly.
-        distributed_init_method = f"tcp://localhost:{port}"
-        return distributed_init_method, None
+    # Connect to a ray cluster.
+    if is_hip():
+        ray.init(address=ray_address,
+                 ignore_reinit_error=True,
+                 num_gpus=parallel_config.world_size)
+    else:
+        ray.init(address=ray_address, ignore_reinit_error=True)
 
+    ray_accel_name = "HPU" if is_hpu() else "GPU"
+
+    if parallel_config.placement_group:
+        # Placement group is already set.
+        return
+
+    # Create placement group for worker processes
     current_placement_group = ray.util.get_current_placement_group()
     if current_placement_group:
         # We are in a placement group
@@ -107,12 +134,13 @@ def initialize_cluster(
                 f"The number of required {ray_accel_name}s exceeds the total number of "
                 f"available {ray_accel_name}s in the cluster.")
         # Create a new placement group
-        current_placement_group = ray.util.placement_group([{
-            ray_accel_name: 1
-        }] * parallel_config.world_size)
+        placement_group_specs = ([{ray_accel_name: 1}] * parallel_config.world_size)
+        current_placement_group = ray.util.placement_group(
+            placement_group_specs)
         # Wait until PG is ready - this will block until all
         # requested resources are available, and will timeout
         # if they cannot be provisioned.
         ray.get(current_placement_group.ready(), timeout=1800)
 
-    return None, current_placement_group
+    # Set the placement group in the parallel config
+    parallel_config.placement_group = current_placement_group
