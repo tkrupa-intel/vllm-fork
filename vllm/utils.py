@@ -6,6 +6,7 @@ import socket
 import subprocess
 import uuid
 import warnings
+import importlib
 from collections import OrderedDict
 from functools import lru_cache, partial
 from platform import uname
@@ -125,6 +126,9 @@ def is_neuron() -> bool:
         transformers_neuronx = None
     return transformers_neuronx is not None
 
+@lru_cache(maxsize=None)
+def is_hpu() -> bool:
+    return importlib.util.find_spec('habana_frameworks') is not None
 
 @lru_cache(maxsize=None)
 def get_max_shared_memory_bytes(gpu: int = 0) -> int:
