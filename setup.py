@@ -181,8 +181,6 @@ def _is_hpu() -> bool:
     except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         torch_synapse_installed = False
     return torch_synapse_installed
-#    import importlib
-#    return importlib.util.find_spec('habana_frameworks') is not None
 
 
 def _is_cuda() -> bool:
