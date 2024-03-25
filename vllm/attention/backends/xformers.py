@@ -4,16 +4,10 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Type
 
 import torch
-from vllm.utils import is_hpu
-if is_hpu():
-    from vllm.hpu import xops
-    from vllm.hpu.attn_bias import (BlockDiagonalCausalMask,
-                                    LowerTriangularMaskWithTensorBias)
-else:
-    from xformers import ops as xops
-    from xformers.ops.fmha.attn_bias import (AttentionBias,
-                                            BlockDiagonalCausalMask,
-                                            LowerTriangularMaskWithTensorBias)
+from xformers import ops as xops
+from xformers.ops.fmha.attn_bias import (AttentionBias,
+                                         BlockDiagonalCausalMask,
+                                         LowerTriangularMaskWithTensorBias)
 
 from vllm.attention.backends.abstract import (AttentionBackend, AttentionImpl,
                                               AttentionMetadata)
