@@ -2,8 +2,12 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 import torch
+from vllm.utils import is_hpu
+if is_hpu():
+    from vllm.hpu import ops, cache_ops
+else:
+    from vllm._C import cache_ops, ops
 
-from vllm._C import cache_ops, ops
 from vllm.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.

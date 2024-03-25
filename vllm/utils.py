@@ -354,6 +354,9 @@ def is_pin_memory_available() -> bool:
     elif is_neuron():
         print_warning_once("Pin memory is not supported on Neuron.")
         return False
+    elif is_hpu():
+        print_warning_once("Pin memory is not supported on HPU.")
+        return False
     return True
 
 
