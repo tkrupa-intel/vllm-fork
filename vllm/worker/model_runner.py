@@ -677,7 +677,7 @@ class ModelRunner:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         self.execute_model(seqs, kv_caches)
-        torch.cuda.synchronize()
+        torch.hpu.synchronize()
         return
 
     def remove_all_loras(self) -> bool:
@@ -738,12 +738,12 @@ class ModelRunner:
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        slot_mapping = torch.empty(max_batch_size, dtype=torch.long).cuda()
+        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
+        input_positions = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
+        slot_mapping = torch.empty(max_batch_size, dtype=torch.long).to('hpu')
         slot_mapping.fill_(_PAD_SLOT_ID)
-        context_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
-        block_tables = torch.from_numpy(self.graph_block_tables).cuda()
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
+        block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
 
         graph_batch_size = _get_graph_batch_size(
             self.scheduler_config.max_num_seqs)

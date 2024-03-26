@@ -22,7 +22,7 @@ from vllm.model_executor.parallel_utils.parallel_state import (
     with_cupy_nccl_for_all_reduce)
 from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
-from vllm.utils import (CudaMemoryProfiler, async_tensor_h2d,
+from vllm.utils import (HabanaMemoryProfiler, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
                         maybe_expand_dim)
 
@@ -88,7 +88,7 @@ class HabanaModelRunner:
             self.model_config.dtype if model_config is not None else None)
 
     def load_model(self) -> None:
-        with CudaMemoryProfiler() as m:
+        with HabanaMemoryProfiler() as m:
             self.model = get_model(self.model_config,
                                    self.device_config,
                                    lora_config=self.lora_config,

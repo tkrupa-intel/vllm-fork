@@ -71,7 +71,7 @@ def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
 
 
 class HpuRotaryEmbedding(nn.Module):
-    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=None, device='cuda'):
+    def __init__(self, head_size, rotary_dim, max_position_embeddings=2048, base=10000, is_neox_style=None, device='hpu'):
         super().__init__()
 
         self.head_size = head_size
