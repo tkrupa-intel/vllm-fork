@@ -85,12 +85,6 @@ class Worker:
             _check_if_gpu_supports_dtype(self.model_config.dtype)
             torch.cuda.empty_cache()
             self.init_gpu_memory = torch.cuda.mem_get_info()[0]
-        elif self.device_config.device.type == "hpu":
-            self.device = torch.device(f"hpu:{self.local_rank}")
-            torch.hpu.set_device(self.device)
-
-            #_check_if_gpu_supports_dtype(self.model_config.dtype)
-            self.init_gpu_memory = torch.hpu.mem_get_info()[0]
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
