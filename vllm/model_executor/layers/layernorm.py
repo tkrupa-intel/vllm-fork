@@ -60,6 +60,7 @@ class RMSNorm(nn.Module):
         if residual is not None:
             if x.device.type == "hpu" and FusedRMSNorm:
                 orig_dtype = x.dtype
+                residual = residual.view(x.shape)
                 residual += x
                 x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
                 return x.to(orig_dtype), residual
@@ -74,6 +75,7 @@ class RMSNorm(nn.Module):
             orig_dtype = x.dtype
             x = FusedRMSNorm.apply(x.float(), self.weight.float(), self.variance_epsilon)
             return x.to(orig_dtype)
+        raise NotImplementedError("RMSNorm is required for HPU.")
         out = torch.empty_like(x)
         ops.rms_norm(
             out,

@@ -97,6 +97,12 @@ class HpuRotaryEmbedding(nn.Module):
         self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
 
     def forward(self, positions: torch.Tensor, query: torch.Tensor, key: torch.Tensor):
+        if query.dim() == 2:
+            query = query.unsqueeze(0)
+        if key.dim() == 2:
+            key = key.unsqueeze(0)
+        if positions.dim() == 1:
+            positions = positions.unsqueeze(0)
         seq_len = key.shape[-2]
         if seq_len > self.max_seq_len_cached:
             self._set_cos_sin_cache(seq_len=seq_len, device=query.device, dtype=query.dtype)

@@ -72,7 +72,7 @@ def _init_torch_distributed(
         import torch
         import habana_frameworks.torch.core as htcore 
         import habana_frameworks.torch.distributed.hccl as hccl
-        import habana_frameworks.torch.gpu_migration
+#        import habana_frameworks.torch.gpu_migration
 
     init_process_group_kwargs.update(
         dict(
