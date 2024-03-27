@@ -1,3 +1,7 @@
+###############################################################################
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+###############################################################################
+
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 

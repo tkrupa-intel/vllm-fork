@@ -1,4 +1,7 @@
-"""Attention layer with xFormers and PagedAttention."""
+###############################################################################
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+###############################################################################
+
 import importlib
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Type

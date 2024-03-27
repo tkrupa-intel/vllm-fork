@@ -1,4 +1,7 @@
-"""A GPU worker class."""
+###############################################################################
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+###############################################################################
+
 import gc
 import os
 from typing import Dict, List, Optional, Set, Tuple

@@ -1,3 +1,7 @@
+###############################################################################
+# Copyright (C) 2024 Habana Labs, Ltd. an Intel Company
+###############################################################################
+
 import contextlib
 import time
 from typing import Dict, List, Optional, Set, Tuple
