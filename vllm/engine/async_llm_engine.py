@@ -330,6 +330,9 @@ class AsyncLLMEngine:
         if device_config.device_type == "neuron":
             raise NotImplementedError("Neuron is not supported for "
                                       "async engine yet.")
+        elif device_config.device_type == "hpu":
+            from vllm.executor.habana_executor import HabanaExecutorAsync
+            executor_class = HabanaExecutorAsync
         elif parallel_config.worker_use_ray or engine_args.engine_use_ray:
             initialize_ray_cluster(parallel_config)
             from vllm.executor.ray_gpu_executor import RayGPUExecutorAsync
