@@ -46,10 +46,8 @@ def scaled_dot_product_attention(query, key, value, scale, mask):
 
 
 @hpu_utils.with_mark_steps
-def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, attn_masks=None)  -> None:
+def paged_attention_v1(query, key_cache, value_cache, head_mapping, scale, block_tables, context_lens, block_size, max_context_len, alibi_slopes, kv_cache_dtype=None)  -> None:
     if alibi_slopes is not None:
-        raise NotImplementedError
-    if attn_masks is not None:
         raise NotImplementedError
 
     key = fetch_from_cache(key_cache, block_tables)

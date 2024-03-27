@@ -25,7 +25,7 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 from vllm.utils import (HabanaMemoryProfiler, async_tensor_h2d,
                         is_pin_memory_available, make_tensor_with_pad,
-                        maybe_expand_dim)
+                        maybe_expand_dim, pad_to_max_length)
 
 logger = init_logger(__name__)
 
@@ -225,13 +225,25 @@ class HabanaModelRunner:
         num_prompt_tokens = len(input_tokens)
         assert max_subquery_len > 0
 
-        input_tokens = torch.tensor(input_tokens,
+        max_seq_len = max(prompt_lens)
+        padded_input_tokens = [
+            pad_to_max_length(tokens, max_seq_len, pad=0) for tokens in input_tokens
+        ]
+        padded_input_positions = [
+            pad_to_max_length(positions, max_seq_len, pad=0)
+            for positions in input_positions
+        ]
+        padded_slot_mapping = [
+            pad_to_max_length(mapping, max_seq_len, pad=-1)
+            for mapping in slot_mapping
+        ]
+        input_tokens = torch.tensor(padded_input_tokens,
                                     dtype=torch.long,
                                     device=self.device)
-        input_positions = torch.tensor(input_positions,
+        input_positions = torch.tensor(padded_input_positions,
                                        dtype=torch.long,
                                        device=self.device)
-        slot_mapping = torch.tensor(slot_mapping,
+        slot_mapping = torch.tensor(padded_slot_mapping,
                                     dtype=torch.long,
                                     device=self.device)
         lora_index_mapping = lora_index_mapping
@@ -274,7 +286,6 @@ class HabanaModelRunner:
                      dim=0,
                      dtype=seq_start_loc.dtype,
                      out=seq_start_loc[1:])
-        import pdb; pdb.set_trace()
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             slot_mapping=slot_mapping,
@@ -302,9 +313,9 @@ class HabanaModelRunner:
     ) -> Tuple[torch.Tensor, torch.Tensor, AttentionMetadata, List[int],
                List[int], Set[LoRARequest]]:
         assert len(seq_group_metadata_list) > 0
-        input_tokens: List[int] = []
-        input_positions: List[int] = []
-        slot_mapping: List[int] = []
+        input_tokens: List[List[int]] = []
+        input_positions: List[List[int]] = []
+        slot_mapping: List[List[int]] = []
         context_lens: List[int] = []
         block_tables: List[List[int]] = []
         lora_index_mapping: List[int] = []
@@ -323,11 +334,11 @@ class HabanaModelRunner:
             for seq_id in seq_ids:
                 seq_data = seq_group_metadata.seq_data[seq_id]
                 generation_token = seq_data.get_last_token_id()
-                input_tokens.append(generation_token)
+                input_tokens.append([generation_token])
 
                 seq_len = seq_data.get_len()
                 position = seq_len - 1
-                input_positions.append(position)
+                input_positions.append([position])
 
                 context_len = seq_len if self.sliding_window is None else min(
                     seq_len, self.sliding_window)
@@ -337,7 +348,7 @@ class HabanaModelRunner:
                 block_number = block_table[position // self.block_size]
                 block_offset = position % self.block_size
                 slot = block_number * self.block_size + block_offset
-                slot_mapping.append(slot)
+                slot_mapping.append([slot])
                 lora_index_mapping.append(lora_id)
                 lora_prompt_mapping.append(lora_id)
 
@@ -405,7 +416,7 @@ class HabanaModelRunner:
                 dtype=torch.int,
                 device=self.device,
             )
-        import pdb; pdb.set_trace()
+
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             slot_mapping=slot_mapping,
