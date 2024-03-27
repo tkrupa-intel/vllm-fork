@@ -35,7 +35,7 @@ def update_cache(data, indices, offsets, cache):
     cache.index_copy_(0, indices, prev)
 
 
-def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, is_prompt):
+def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, dtype, is_prompt):
     block_size = key_cache.size(-1)
     assert slot_mapping.dim() == 2, 'This implementation requires unflattened slot_mapping!'
 

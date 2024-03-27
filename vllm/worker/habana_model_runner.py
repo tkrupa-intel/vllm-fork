@@ -189,10 +189,11 @@ class HabanaModelRunner:
                 (prompt_len - computed_len
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
+            seq_slot_mapping = []
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                slot_mapping.append([_PAD_SLOT_ID] * prompt_len)
+                seq_slot_mapping.append([_PAD_SLOT_ID] * prompt_len)
                 continue
 
             # Compute the slot mapping.
@@ -210,13 +211,14 @@ class HabanaModelRunner:
                 start_idx = max(0, prompt_len - self.sliding_window)
             for i in range(computed_len, prompt_len):
                 if i < start_idx:
-                    slot_mapping.append(_PAD_SLOT_ID)
+                    seq_slot_mapping.append(_PAD_SLOT_ID)
                     continue
 
                 block_number = block_table[i // self.block_size]
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
-                slot_mapping.append(slot)
+                seq_slot_mapping.append(slot)
+            slot_mapping.append(seq_slot_mapping)
 
         max_subquery_len = max(subquery_lens)
         max_prompt_len = max(prompt_lens)
@@ -272,7 +274,7 @@ class HabanaModelRunner:
                      dim=0,
                      dtype=seq_start_loc.dtype,
                      out=seq_start_loc[1:])
-
+        import pdb; pdb.set_trace()
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=True,
             slot_mapping=slot_mapping,
@@ -403,7 +405,7 @@ class HabanaModelRunner:
                 dtype=torch.int,
                 device=self.device,
             )
-
+        import pdb; pdb.set_trace()
         attn_metadata = self.attn_backend.make_metadata(
             is_prompt=False,
             slot_mapping=slot_mapping,
@@ -613,7 +615,7 @@ class HabanaModelRunner:
             attn_metadata=attn_metadata,
         )
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        # Compute the logits.
+         # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
         # Only perform sampling in the driver worker.
