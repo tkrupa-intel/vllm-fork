@@ -421,8 +421,8 @@ class LLMEngine:
             self.detokenizer.decode_sequence_inplace(seq,
                                                      seq_group.sampling_params)
             self._check_stop(seq, seq_group.sampling_params)
-            emitted_token = seq.tokens[seq.prefix_offset:] if not seq.status == SequenceStatus.FINISHED_STOPPED else '<EOS>'
-            print(f'[{seq.status}] Emitted token: {emitted_token} ({seq.get_token_ids()[-1]}) ({seq.output_text!r})')
+            #emitted_token = seq.tokens[seq.prefix_offset:] if not seq.status == SequenceStatus.FINISHED_STOPPED else '<EOS>'
+            #print(f'[{seq.status}] Emitted token: {emitted_token} ({seq.get_token_ids()[-1]}) ({seq.output_text!r})')
  
         # Non-beam search case
         if not seq_group.sampling_params.use_beam_search:
