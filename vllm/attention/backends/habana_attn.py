@@ -309,7 +309,7 @@ class HabanaAttentionImpl(AttentionImpl):
             )
 
         # Reshape the output tensor.
-        return output.view(-1, self.num_heads * self.head_size)
+        return output.view(batch_size, seq_len, hidden_size)
 
 
 def _make_alibi_bias(

@@ -60,10 +60,11 @@ class RMSNorm(nn.Module):
         if residual is not None:
             if x.device.type == "hpu" and FusedRMSNorm:
                 orig_dtype = x.dtype
-                residual = residual.view(x.shape)
-                residual += x
+                orig_shape = x.shape
+                residual += x.view(residual.shape)
+                # Note: FusedRMSNorm requires 3D tensors as inputs
                 x = FusedRMSNorm.apply(residual.float(), self.weight.float(), self.variance_epsilon)
-                return x.to(orig_dtype), residual
+                return x.to(orig_dtype).view(orig_shape), residual.view(orig_shape)
             ops.fused_add_rms_norm(
                 x,
                 residual,

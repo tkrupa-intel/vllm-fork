@@ -5,6 +5,7 @@ from typing import Dict, List, Optional, Set, Tuple
 import numpy as np
 import torch
 import torch.nn as nn
+import habana_frameworks.torch as htorch
 
 from vllm.attention import AttentionMetadata, get_attn_backend
 from vllm.config import (DeviceConfig, LoRAConfig, ModelConfig, ParallelConfig,
@@ -611,6 +612,7 @@ class HabanaModelRunner:
             kv_caches=kv_caches,
             attn_metadata=attn_metadata,
         )
+        hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
         # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
@@ -675,7 +677,7 @@ class HabanaModelRunner:
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         self.execute_model(seqs, kv_caches)
-        torch.cuda.synchronize()
+        torch.hpu.synchronize()
         return
 
     def remove_all_loras(self) -> bool:
