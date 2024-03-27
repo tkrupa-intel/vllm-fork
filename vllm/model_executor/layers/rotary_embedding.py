@@ -147,7 +147,6 @@ class RotaryEmbedding(nn.Module):
         key: torch.Tensor,
         offsets: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        return self._forward(positions, query, key, offsets)
         self.cos_sin_cache = self.cos_sin_cache.to(positions.device)
         # ops.rotary_embedding()/batched_rotary_embedding()
         # are in-place operations that update the query and key tensors.
@@ -360,7 +359,7 @@ def get_rope(
 
     if rope_scaling is None:
         if is_hpu():
-            rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
+            rotary_emb = HpuRotaryEmbedding(head_size, rotary_dim, max_position, base,
                                             is_neox_style)
         else:
             rotary_emb = RotaryEmbedding(head_size, rotary_dim, max_position, base,
