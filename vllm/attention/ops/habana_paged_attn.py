@@ -95,21 +95,7 @@ class HabanaPagedAttention:
         scale: float,
         alibi_slopes: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        output = torch.empty_like(query)
-
         block_size = value_cache.shape[3]
-        num_seqs, num_heads, head_size = query.shape
-        max_num_partitions = ((max_context_len + _PARTITION_SIZE - 1) //
-                              _PARTITION_SIZE)
-        # NOTE(woosuk): We use a simple heuristic to decide whether to use
-        # PagedAttention V1 or V2. If the number of partitions is 1, we use
-        # V1 to avoid the overhead of reduction. Also, if the number of
-        # sequences or heads is large, we use V1 since there is enough work
-        # to parallelize.
-        # TODO(woosuk): Tune this heuristic.
-        # For context len > 8192, use V2 kernel to avoid shared memory shortage.
-
-        # Run PagedAttention V1.
         return ops.paged_attention_v1(
             query,
             key_cache,
