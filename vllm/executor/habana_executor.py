@@ -47,7 +47,7 @@ class HabanaExecutor(ExecutorBase):
         from vllm.worker.habana_worker import HabanaWorker
 
         assert self.parallel_config.world_size == 1, (
-            "GPUExecutor only supports single GPU.")
+            "HabanaExecutor only supports single GPU.")
 
         distributed_init_method = get_distributed_init_method(
             get_ip(), get_open_port())
@@ -86,7 +86,7 @@ class HabanaExecutor(ExecutorBase):
                 cache_dtype=self.cache_config.cache_dtype,
             ))
 
-        logger.info(f"# GPU blocks: {num_gpu_blocks}, "
+        logger.info(f"# HPU blocks: {num_gpu_blocks}, "
                     f"# CPU blocks: {num_cpu_blocks}")
 
         check_block_size_valid(num_gpu_blocks, self.cache_config.block_size,
