@@ -169,8 +169,6 @@ class HabanaAttentionImpl(AttentionImpl):
                 f"Head size {head_size} is not supported by PagedAttention. "
                 f"Supported head sizes are: {suppored_head_sizes}.")
 
-        self.use_naive_attention = False
-
     def forward(
         self,
         query: torch.Tensor,
@@ -197,7 +195,6 @@ class HabanaAttentionImpl(AttentionImpl):
         query = query.view(-1, self.num_heads, self.head_size)
         key = key.view(-1, self.num_kv_heads, self.head_size)
         value = value.view(-1, self.num_kv_heads, self.head_size)
-
         if kv_cache is not None:
             key_cache, value_cache = HabanaPagedAttention.split_kv_cache(
                 kv_cache, self.num_kv_heads, self.head_size)
@@ -234,30 +231,6 @@ class HabanaAttentionImpl(AttentionImpl):
                                                   self.num_kv_heads,
                                                   self.num_queries_per_kv,
                                                   value.shape[-1])
-
-                if self.use_naive_attention:
-                    output = torch.empty_like(query)
-                    start = 0
-                    for _, prompt_len in enumerate(attn_metadata.prompt_lens):
-                        end = start + prompt_len
-                        out = _naive_masked_attention(
-                            query[None, start:end],
-                            key[None, start:end],
-                            value[None, start:end],
-                            self.num_heads,
-                            self.num_kv_heads,
-                            self.head_size,
-                            self.scale,
-                        )
-                        # TODO(woosuk): Unnecessary copy. Optimize.
-                        output[start:end].copy_(out)
-                        start += prompt_len
-
-                    # Using view got RuntimeError: view size is not compatible
-                    # with input tensor's size and stride (at least one
-                    # dimension spans across two contiguous subspaces).
-                    # Use reshape instead.
-                    return output.reshape(num_tokens, hidden_size)
 
                 if attn_metadata.attn_bias is None:
                     if self.alibi_slopes is None:
