@@ -174,6 +174,8 @@ class HabanaModelRunner:
                 context_len = 0
             # actual prompt lens
             context_lens.append(context_len)
+            if computed_len != 0:
+                import pdb; pdb.set_trace() # what happens if we hit that path??
             subquery_lens.append(prompt_len - computed_len)
 
             input_tokens.append(prompt_tokens)
@@ -193,14 +195,14 @@ class HabanaModelRunner:
                 (prompt_len - computed_len
                  if seq_group_metadata.sampling_params.prompt_logprobs else 1))
 
-            seq_slot_mapping = []
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                seq_slot_mapping.append([_PAD_SLOT_ID] * prompt_len)
+                slot_mapping.append([_PAD_SLOT_ID] * prompt_len)
                 continue
 
             # Compute the slot mapping.
+            slot_mapping.append([])
             block_table = seq_group_metadata.block_tables[seq_id]
             # Mask the [0, start_idx) tokens of the prompt with _PAD_SLOT_ID,
             # where start_idx is max(0, prompt_len - sliding_window).
@@ -215,48 +217,45 @@ class HabanaModelRunner:
                 start_idx = max(0, prompt_len - self.sliding_window)
             for i in range(computed_len, prompt_len):
                 if i < start_idx:
-                    seq_slot_mapping.append(_PAD_SLOT_ID)
+                    slot_mapping[-1].append(_PAD_SLOT_ID)
                     continue
 
                 block_number = block_table[i // self.block_size]
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
-                seq_slot_mapping.append(slot)
-            slot_mapping.append(seq_slot_mapping)
+                slot_mapping[-1].append(slot)
 
         max_subquery_len = max(subquery_lens)
         max_prompt_len = max(prompt_lens)
         num_prompt_tokens = len(input_tokens)
         assert max_subquery_len > 0
-
-        max_seq_len = max(prompt_lens)
-        padded_input_tokens = [
-            pad_to_max_length(tokens, max_seq_len, pad=0) for tokens in input_tokens
-        ]
-        padded_input_positions = [
-            pad_to_max_length(positions, max_seq_len, pad=0)
-            for positions in input_positions
-        ]
-        padded_slot_mapping = [
-            pad_to_max_length(mapping, max_seq_len, pad=-1)
-            for mapping in slot_mapping
-        ]
-        input_tokens = torch.tensor(padded_input_tokens,
-                                    dtype=torch.long,
-                                    device=self.device)
-        input_positions = torch.tensor(padded_input_positions,
-                                       dtype=torch.long,
-                                       device=self.device)
-        slot_mapping = torch.tensor(padded_slot_mapping,
-                                    dtype=torch.long,
-                                    device=self.device)
+       
         lora_index_mapping = lora_index_mapping
 
         context_lens_tensor = torch.tensor(context_lens,
                                            dtype=torch.int,
                                            device=self.device)
-        # Prepare prefix block tables
         max_prompt_block_table_len = max(len(t) for t in prefix_block_tables)
+        max_prompt_len = max(prompt_lens)
+        input_tokens = make_tensor_with_pad(input_tokens,
+                                             max_prompt_len,
+                                             pad=0,
+                                             dtype=torch.long,
+                                             device=self.device)
+        
+        input_positions = make_tensor_with_pad(input_positions,
+                                                max_prompt_len,
+                                                pad=0,
+                                                dtype=torch.long,
+                                                device=self.device)
+        
+        slot_mapping = make_tensor_with_pad(slot_mapping,
+                                             max_prompt_len,
+                                             pad=_PAD_SLOT_ID,
+                                             dtype=torch.long,
+                                             device=self.device)
+
+        # Prepare prefix block tables
         block_tables = make_tensor_with_pad(
             prefix_block_tables,
             max_len=max_prompt_block_table_len,
@@ -454,7 +453,7 @@ class HabanaModelRunner:
         categorized_sample_indices = {t: [] for t in SamplingType}
         categorized_sample_indices_start_idx = 0
         categorized_sampled_token_indices_start_idx = 0
-
+        max_subquery_len = max(subquery_lens) if subquery_lens else 1
         for i, seq_group_metadata in enumerate(seq_group_metadata_list):
             seq_ids = list(seq_group_metadata.seq_data.keys())
             sampling_params = seq_group_metadata.sampling_params
@@ -482,7 +481,7 @@ class HabanaModelRunner:
                               selected_token_start_idx + subquery_len - 1))
                 selected_token_indices.append(selected_token_start_idx +
                                               subquery_len - 1)
-                selected_token_start_idx += subquery_len
+                selected_token_start_idx += max_subquery_len
 
                 if sampling_params.seed is not None:
                     seq_group_metadata.state.generator = torch.Generator(
@@ -645,6 +644,7 @@ class HabanaModelRunner:
 
     @torch.inference_mode()
     def profile_run(self) -> None:
+        return
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
