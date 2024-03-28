@@ -644,7 +644,6 @@ class HabanaModelRunner:
 
     @torch.inference_mode()
     def profile_run(self) -> None:
-        return
         # Enable top-k sampling to reflect the accurate memory usage.
         sampling_params = SamplingParams(top_p=0.99, top_k=self.vocab_size - 1)
         max_num_batched_tokens = self.scheduler_config.max_num_batched_tokens
