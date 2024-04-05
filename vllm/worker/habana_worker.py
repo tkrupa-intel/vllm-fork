@@ -13,7 +13,6 @@ from vllm.config import (CacheConfig, DeviceConfig, LoRAConfig, ModelConfig,
                          ParallelConfig, SchedulerConfig)
 from vllm.lora.request import LoRARequest
 from vllm.model_executor import set_random_seed
-from vllm.model_executor.parallel_utils import cupy_utils
 from vllm.model_executor.parallel_utils.communication_op import (
     broadcast_tensor_dict)
 from vllm.model_executor.parallel_utils.custom_all_reduce import init_custom_ar
@@ -25,10 +24,10 @@ from vllm.worker.habana_model_runner import HabanaModelRunner
 
 
 class HabanaWorker:
-    """A worker class that executes (a partition of) the model on a GPU.
+    """A worker class that executes (a partition of) the model on a HPU.
 
-    Each worker is associated with a single GPU. The worker is responsible for
-    maintaining the KV cache and executing the model on the GPU. In case of
+    Each worker is associated with a single HPU. The worker is responsible for
+    maintaining the KV cache and executing the model on the HPU. In case of
     distributed inference, each worker is assigned a partition of the model.
     """
 
@@ -68,21 +67,21 @@ class HabanaWorker:
         # self.init_cache_engine().
         self.cache_config = None
         self.cache_engine = None
-        self.gpu_cache = None
+        self.hpu_cache = None
 
-    def init_device(self, cupy_port: Optional[int] = None) -> None:
+    def init_device(self) -> None:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
 
-            #_check_if_gpu_supports_dtype(self.model_config.dtype)
-            self.init_gpu_memory = torch.hpu.mem_get_info()[0]
+            #_check_if_hpu_supports_dtype(self.model_config.dtype)
+            self.init_hpu_memory = torch.hpu.mem_get_info()[0]
         else:
             raise RuntimeError(
                 f"Not support device type: {self.device_config.device}")
         # Initialize the distributed environment.
         init_distributed_environment(self.parallel_config, self.rank,
-                                     cupy_port, self.distributed_init_method)
+                                     self.distributed_init_method)
         # Set random seed.
         set_random_seed(self.model_config.seed)
 
@@ -93,16 +92,16 @@ class HabanaWorker:
     def profile_num_available_blocks(
         self,
         block_size: int,
-        gpu_memory_utilization: float,
+        hpu_memory_utilization: float,
         cpu_swap_space: int,
         cache_dtype: str,
     ) -> Tuple[int, int]:
         """Profiles the peak memory usage of the model and returns the maximum
-        number of GPU and CPU cache blocks that can be allocated.
+        number of HPU and CPU cache blocks that can be allocated.
 
         Args:
             block_size: The size of the cache block.
-            gpu_memory_utilization: The fraction of the total GPU memory to use.
+            hpu_memory_utilization: The fraction of the total HPU memory to use.
             cpu_swap_space: The size of the CPU swap space in bytes.
         """
         # Profile the memory usage of the model and get the maximum number of
@@ -115,37 +114,37 @@ class HabanaWorker:
         # Calculate the number of blocks that can be allocated with the
         # profiled peak memory.
         torch.hpu.synchronize()
-        free_gpu_memory, total_gpu_memory = torch.hpu.mem_get_info()
+        free_hpu_memory, total_hpu_memory = torch.hpu.mem_get_info()
         # NOTE(woosuk): Here we assume that the other processes using the same
-        # GPU did not change their memory usage during the profiling.
-        peak_memory = self.init_gpu_memory - free_gpu_memory
+        # HPU did not change their memory usage during the profiling.
+        peak_memory = self.init_hpu_memory - free_hpu_memory
         assert peak_memory > 0, (
-            "Error in memory profiling. This happens when the GPU memory was "
+            "Error in memory profiling. This happens when the hpu memory was "
             "not properly cleaned up before initializing the vLLM instance.")
 
         cache_block_size = self.get_cache_block_size_bytes(
             block_size, cache_dtype)
-        num_gpu_blocks = int(
-            (total_gpu_memory * gpu_memory_utilization - peak_memory) //
+        num_hpu_blocks = int(
+            (total_hpu_memory * hpu_memory_utilization - peak_memory) //
             cache_block_size)
         num_cpu_blocks = int(cpu_swap_space // cache_block_size)
-        num_gpu_blocks = max(num_gpu_blocks, 0)
+        num_hpu_blocks = max(num_hpu_blocks, 0)
         num_cpu_blocks = max(num_cpu_blocks, 0)
         if self.model_runner.lora_manager:
             self.model_runner.remove_all_loras()
         gc.collect()
-        return num_gpu_blocks, num_cpu_blocks
+        return num_hpu_blocks, num_cpu_blocks
 
     def init_cache_engine(self, cache_config: CacheConfig) -> None:
         self.cache_config = cache_config
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
-        self.gpu_cache = self.cache_engine.gpu_cache
+        self.hpu_cache = self.cache_engine.hpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
     def warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
-            self.model_runner.capture_model(self.gpu_cache)
+            self.model_runner.capture_model(self.hpu_cache)
         # Reset the seed to ensure that the random state is not affected by
         # the model initialization and profiling.
         set_random_seed(self.model_config.seed)
@@ -200,7 +199,7 @@ class HabanaWorker:
             return {}
 
         output = self.model_runner.execute_model(seq_group_metadata_list,
-                                                 self.gpu_cache)
+                                                 self.hpu_cache)
         return output
 
     def add_lora(self, lora_request: LoRARequest) -> bool:
@@ -232,7 +231,6 @@ class HabanaWorker:
 def init_distributed_environment(
     parallel_config: ParallelConfig,
     rank: int,
-    cupy_port: Optional[int],
     distributed_init_method: Optional[str] = None,
 ) -> None:
     """Initialize the distributed environment."""
@@ -255,28 +253,8 @@ def init_distributed_environment(
             init_method=distributed_init_method,
         )
 
-    if cupy_utils.is_initialized():
-        cupy_world_size = cupy_utils.get_world_size()
-        if cupy_world_size != parallel_config.world_size:
-            raise RuntimeError(
-                "cupy.distributed is already initialized but the cupy world "
-                "size does not match parallel_config.world_size "
-                f"({cupy_world_size} vs. {parallel_config.world_size}).")
-    elif (parallel_config.world_size > 1 and cupy_port is not None):
-        # NOTE(woosuk): We don't initialize CuPy process group when world size
-        # is 1.
-        # TODO(woosuk): Support multi-node connection.
-        cupy_utils.init_process_group(
-            world_size=parallel_config.world_size,
-            rank=rank,
-            host="localhost",
-            port=cupy_port,
-        )
-
     # A small all_reduce for warmup.
     torch.distributed.all_reduce(torch.zeros(1).to('hpu'))
-    if cupy_utils.is_initialized():
-        cupy_utils.all_reduce(torch.zeros(1).to('hpu'))
     ensure_model_parallel_initialized(parallel_config.tensor_parallel_size,
                                       parallel_config.pipeline_parallel_size)
 

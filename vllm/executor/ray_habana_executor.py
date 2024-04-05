@@ -186,11 +186,7 @@ class RayHabanaExecutor(ExecutorBase):
             is_driver_worker=True,
         )
 
-        # FIXME(woosuk): We are not properly initializing cupy NCCL when
-        # we have multiple nodes.
-        self._run_workers("init_device",
-                          cupy_port=get_open_port()
-                          if not model_config.enforce_eager else None)
+        self._run_workers("init_device")
         self._run_workers(
             "load_model",
             max_concurrent_workers=self.parallel_config.
@@ -222,7 +218,7 @@ class RayHabanaExecutor(ExecutorBase):
         num_blocks = self._run_workers(
             "profile_num_available_blocks",
             block_size=self.cache_config.block_size,
-            gpu_memory_utilization=self.cache_config.gpu_memory_utilization,
+            hpu_memory_utilization=self.cache_config.gpu_memory_utilization,
             cpu_swap_space=self.cache_config.swap_space_bytes,
             cache_dtype=self.cache_config.cache_dtype,
         )
