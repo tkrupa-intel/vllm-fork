@@ -628,28 +628,17 @@ class HabanaModelRunner:
             attn_metadata=attn_metadata,
         )
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-        
-        # Compute the logits.
+         # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
         # Only perform sampling in the driver worker.
         if not sampling_metadata.perform_sampling:
             return None
-
-        #htorch.core.mark_step()
-        #htorch.hpu.synchronize()
-        #import pdb; pdb.set_trace()
-
         # Sample the next token.
         output = self.model.sample(
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
-
-        #htorch.core.mark_step()
-        #htorch.hpu.synchronize()
-        #import pdb; pdb.set_trace()
-
         return output
 
     @torch.inference_mode()

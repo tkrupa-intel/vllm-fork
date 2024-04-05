@@ -180,7 +180,7 @@ def _is_hpu() -> bool:
     try:
         subprocess.run(["hl-smi"], capture_output=True, check=True)
     except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
-        if not (os.path.exists('/dev/hl0') and os.path.exists('/dev/hl_controlD0')):
+        if not os.path.exists('/dev/hl0') and not os.path.exists('/dev/hl_controlD0'):
             is_hpu_available = False
     return is_hpu_available
 

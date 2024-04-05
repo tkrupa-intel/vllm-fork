@@ -72,7 +72,7 @@ class HabanaWorker:
 
     def init_device(self, cupy_port: Optional[int] = None) -> None:
         if self.device_config.device.type == "hpu":
-            self.device = torch.device(f"hpu:{self.local_rank}")
+            self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
 
             #_check_if_gpu_supports_dtype(self.model_config.dtype)

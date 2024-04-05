@@ -133,8 +133,13 @@ class LLMEngine:
             from vllm.executor.neuron_executor import NeuronExecutor
             executor_class = NeuronExecutor
         elif device_config.device_type == "hpu":
-            from vllm.executor.habana_executor import HabanaExecutor
-            executor_class = HabanaExecutor
+            if parallel_config.worker_use_ray:
+                initialize_ray_cluster(parallel_config)
+                from vllm.executor.ray_habana_executor import RayHabanaExecutor
+                executor_class = RayHabanaExecutor
+            else:
+                from vllm.executor.habana_executor import HabanaExecutor
+                executor_class = HabanaExecutor
         elif parallel_config.worker_use_ray:
             initialize_ray_cluster(parallel_config)
             from vllm.executor.ray_gpu_executor import RayGPUExecutor
