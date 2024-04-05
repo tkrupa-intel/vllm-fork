@@ -134,8 +134,8 @@ class HabanaExecutor(ExecutorBase):
                 logger.warning(f"VLLM_HPU_STEP_GRAPH_COMPILATION: {gc_local_metric.stats()}, is_prompt: {is_prompt}, batch: {len(seq_group_metadata_list)} max_context_len: {max_context_len}, max_num_blocks {max_num_blocks}")
             if log_detailed_metrics:
                 logger.warning(f"VLLM_HPU_STEP_CPU_FALLBACK: {cpu_fallback_local_metric.stats()}")
-                if can_collect_recipe_cache_metrics:
-                    logger.warning(f"VLLM_HPU_STEP_RECIPE_CACHE: {recipe_cache_local_metric.stats()}")
+            if can_collect_recipe_cache_metrics:
+                logger.warning(f"VLLM_HPU_STEP_RECIPE_CACHE: {recipe_cache_local_metric.stats()}")
             
             return output
 
