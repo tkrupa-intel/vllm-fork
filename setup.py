@@ -175,6 +175,7 @@ class cmake_build_ext(build_ext):
 
 
 def _is_hpu() -> bool:
+    return True 
     is_hpu_available = True
     try:
         subprocess.run(["hl-smi"], capture_output=True, check=True)
