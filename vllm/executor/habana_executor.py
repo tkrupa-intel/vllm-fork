@@ -13,7 +13,7 @@ from vllm.lora.request import LoRARequest
 from vllm.sequence import SamplerOutput, SequenceGroupMetadata
 from vllm.utils import (get_distributed_init_method, get_ip, get_open_port,
                         make_async)
-
+import os
 logger = init_logger(__name__)
 
 
@@ -106,6 +106,25 @@ class HabanaExecutor(ExecutorBase):
                       blocks_to_swap_in: Dict[int, int],
                       blocks_to_swap_out: Dict[int, int],
                       blocks_to_copy: Dict[int, List[int]]) -> SamplerOutput:
+
+        # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any
+        # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none
+        if os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION', '0') != '0' or os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0':
+            from habana_frameworks.torch.hpu.metrics import metric_localcontext
+            is_prompt = any([seq_group_metadata.is_prompt for seq_group_metadata in seq_group_metadata_list])
+            max_context_len = max([max([len(v.prompt_token_ids) + len(v.output_token_ids) for v in seq_group_metadata.seq_data.values()]) for seq_group_metadata in seq_group_metadata_list]) # whoa, that's some spicy stuff right here
+            max_num_blocks = ((max_context_len - 1) // self.cache_config.block_size) + 1
+            with metric_localcontext("graph_compilation") as local_metric:
+                output = self.driver_worker.execute_model(
+                    seq_group_metadata_list=seq_group_metadata_list,
+                    blocks_to_swap_in=blocks_to_swap_in,
+                    blocks_to_swap_out=blocks_to_swap_out,
+                    blocks_to_copy=blocks_to_copy,
+                )
+            if os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0' or local_metric.stats()[0][1] > 0:
+                logger.warning(f"VLLM_HPU_STEP_GRAPH_COMPILATION: {local_metric.stats()}, is_prompt: {is_prompt}, batch: {len(seq_group_metadata_list)} max_context_len: {max_context_len}, max_num_blocks {max_num_blocks}")
+            return output
+
         output = self.driver_worker.execute_model(
             seq_group_metadata_list=seq_group_metadata_list,
             blocks_to_swap_in=blocks_to_swap_in,

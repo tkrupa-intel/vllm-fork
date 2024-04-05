@@ -72,9 +72,8 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-
-        self.graph_runners: Dict[int, CUDAGraphRunner] = {}
-        self.graph_memory_pool = None  # Set during graph capture.
+        self.graph_runner_class = FakeHPUGraphRunner
+        self.graph_runners: Dict[int, self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
             self.model_config.max_context_len_to_capture
@@ -374,9 +373,9 @@ class HabanaModelRunner:
             graph_batch_size = _get_graph_batch_size(batch_size)
             assert graph_batch_size >= batch_size
             for _ in range(graph_batch_size - batch_size):
-                input_tokens.append(0)
-                input_positions.append(0)
-                slot_mapping.append(_PAD_SLOT_ID)
+                input_tokens.append([0])
+                input_positions.append([0])
+                slot_mapping.append([_PAD_SLOT_ID])
                 context_lens.append(1)
                 block_tables.append([])
                 lora_index_mapping.append(0)
@@ -629,17 +628,28 @@ class HabanaModelRunner:
             attn_metadata=attn_metadata,
         )
         hidden_states = hidden_states.view(-1, hidden_states.shape[-1])
-         # Compute the logits.
+        
+        # Compute the logits.
         logits = self.model.compute_logits(hidden_states, sampling_metadata)
 
         # Only perform sampling in the driver worker.
         if not sampling_metadata.perform_sampling:
             return None
+
+        #htorch.core.mark_step()
+        #htorch.hpu.synchronize()
+        #import pdb; pdb.set_trace()
+
         # Sample the next token.
         output = self.model.sample(
             logits=logits,
             sampling_metadata=sampling_metadata,
         )
+
+        #htorch.core.mark_step()
+        #htorch.hpu.synchronize()
+        #import pdb; pdb.set_trace()
+
         return output
 
     @torch.inference_mode()
@@ -754,12 +764,12 @@ class HabanaModelRunner:
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        input_positions = torch.zeros(max_batch_size, dtype=torch.long).cuda()
-        slot_mapping = torch.empty(max_batch_size, dtype=torch.long).cuda()
+        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
+        input_positions = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
+        slot_mapping = torch.zeros(max_batch_size, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
         slot_mapping.fill_(_PAD_SLOT_ID)
-        context_lens = torch.ones(max_batch_size, dtype=torch.int32).cuda()
-        block_tables = torch.from_numpy(self.graph_block_tables).cuda()
+        context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
+        block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
 
         graph_batch_size = _get_graph_batch_size(
             self.scheduler_config.max_num_seqs)
@@ -802,16 +812,14 @@ class HabanaModelRunner:
                         [0] * batch_size,
                     )
                     self.set_active_loras(set(), lora_mapping)
-
-                graph_runner = CUDAGraphRunner(self.model)
+                
+                graph_runner = self.graph_runner_class(self.model)
                 graph_runner.capture(
                     input_tokens[:batch_size],
                     input_positions[:batch_size],
                     kv_caches,
                     attn_metadata,
-                    memory_pool=self.graph_memory_pool,
                 )
-                self.graph_memory_pool = graph_runner.graph.pool()
                 self.graph_runners[batch_size] = graph_runner
 
         end_time = time.perf_counter()
@@ -846,7 +854,6 @@ class CUDAGraphRunner:
         positions: torch.Tensor,
         kv_caches: List[torch.Tensor],
         attn_metadata: AttentionMetadata,
-        memory_pool,
     ) -> None:
         assert self.graph is None
         # Run the model once without capturing the graph.
@@ -865,7 +872,7 @@ class CUDAGraphRunner:
         # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
         # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
         self.graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.graph, pool=memory_pool):  # noqa: SIM117
+        with torch.cuda.graph(self.graph):  # noqa: SIM117
             with _maybe_cupy_nccl():
                 hidden_states = self.model(
                     input_ids,
@@ -915,6 +922,36 @@ class CUDAGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+class FakeHPUGraphRunner:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+
+    def capture(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> None:
+        return
+    
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        return self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+        )
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
 @contextlib.contextmanager
 def _maybe_cupy_nccl():

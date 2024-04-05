@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple
 import torch
 
 from vllm.hpu import cache_ops, ops
-from vllm.attention.ops.prefix_prefill import context_attention_fwd
 
 # Should be the same as PARTITION_SIZE in `paged_attention_v2_launcher`.
 _PARTITION_SIZE = 512
@@ -128,23 +127,7 @@ class HabanaPagedAttention:
         max_subquery_len: int,
         alibi_slopes: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        output = torch.empty_like(query)
-        context_attention_fwd(
-            query,
-            key,
-            value,
-            output,
-            key_cache,
-            value_cache,
-            block_tables,
-            # subquery_start_loc is (batch_size + 1,)
-            subquery_start_loc[:-1],
-            prompt_lens_tensor,
-            context_lens,
-            max_subquery_len,
-            alibi_slopes,
-        )
-        return output
+        raise NotImplementedError("forward_prefix is not implemented for HabanaPagedAttention")
 
     @staticmethod
     def swap_blocks(
