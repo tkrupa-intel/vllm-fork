@@ -175,12 +175,13 @@ class cmake_build_ext(build_ext):
 
 
 def _is_hpu() -> bool:
-    torch_synapse_installed = True
+    is_hpu_available = True
     try:
         subprocess.run(["hl-smi"], capture_output=True, check=True)
     except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
-        torch_synapse_installed = False
-    return torch_synapse_installed
+        if not (os.path.exists('/dev/hl0') and os.path.exists('/dev/hl_controlD0')):
+            is_hpu_available = False
+    return is_hpu_available
 
 
 def _is_cuda() -> bool:
@@ -273,7 +274,7 @@ def find_version(filepath: str) -> str:
             return version_match.group(1)
         raise RuntimeError("Unable to find version string.")
 
-def get_synapse_version():
+def get_gaudi_sw_version():
     """
     Returns the driver version.
     """
@@ -283,7 +284,7 @@ def get_synapse_version():
     )
     if output.returncode == 0 and output.stdout:
         return output.stdout.split("\n")[2].replace(" ", "").split(":")[1][:-1].split("-")[0]
-    return None
+    return "0.0.0" # when hl-smi is not available
 
 def get_vllm_version() -> str:
     version = find_version(get_path("vllm", "__init__.py"))
@@ -306,11 +307,11 @@ def get_vllm_version() -> str:
             neuron_version_str = neuron_version.replace(".", "")[:3]
             version += f"+neuron{neuron_version_str}"
     elif _is_hpu():
-        # Get the Synapse version
-        synapse_version = str(get_synapse_version()) 
-        if synapse_version != MAIN_CUDA_VERSION:
-            synapse_version_str = synapse_version.replace(".", "")[:3]
-            version += f"+synapse{synapse_version_str}"
+        # Get the Intel Gaudi Software Suite version
+        gaudi_sw_version = str(get_gaudi_sw_version()) 
+        if gaudi_sw_version != MAIN_CUDA_VERSION:
+            gaudi_sw_version = gaudi_sw_version.replace(".", "")[:3]
+            version += f"+gaudi{gaudi_sw_version}"
     else:
         raise RuntimeError("Unknown runtime environment")
 
