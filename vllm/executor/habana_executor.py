@@ -110,7 +110,7 @@ class HabanaExecutor(ExecutorBase):
 
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION     - will log graph compilations per engine step, only when there was any
         # VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL - will log graph compilations per engine step, always, even if there were none
-        # VLLM_HPU_LOG_STEP_DETAILED_METRICS      - will log graph compilations, cpu fallbacks and recipe cache usage
+        # VLLM_HPU_LOG_STEP_DETAILED_METRICS      - will log graph compilations and cpu fallbacks
         log_graph_compilation_all = os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION_ALL', '0') != '0'
         log_detailed_metrics = os.environ.get('VLLM_HPU_LOG_STEP_DETAILED_METRICS', '0') != '0'
         log_graph_compilation = os.environ.get('VLLM_HPU_LOG_STEP_GRAPH_COMPILATION', '0') != '0'
@@ -121,9 +121,7 @@ class HabanaExecutor(ExecutorBase):
             max_num_blocks = ((max_context_len - 1) // self.cache_config.block_size) + 1
             gc_ctx = metric_localcontext("graph_compilation")
             cpu_fallback_ctx = metric_localcontext("cpu_fallback") if log_detailed_metrics else contextlib.nullcontext()
-            can_collect_recipe_cache_metrics = log_detailed_metrics and os.environ.get('PT_HPU_ENABLE_CACHE_METRICS', '0') != '0'
-            recipe_cache_ctx = metric_localcontext("recipe_cache") if can_collect_recipe_cache_metrics else contextlib.nullcontext()
-            with gc_ctx as gc_local_metric, cpu_fallback_ctx as cpu_fallback_local_metric, recipe_cache_ctx as recipe_cache_local_metric:
+            with gc_ctx as gc_local_metric, cpu_fallback_ctx as cpu_fallback_local_metric:
                 output = self.driver_worker.execute_model(
                     seq_group_metadata_list=seq_group_metadata_list,
                     blocks_to_swap_in=blocks_to_swap_in,
@@ -134,8 +132,6 @@ class HabanaExecutor(ExecutorBase):
                 logger.warning(f"VLLM_HPU_STEP_GRAPH_COMPILATION: {gc_local_metric.stats()}, is_prompt: {is_prompt}, batch: {len(seq_group_metadata_list)} max_context_len: {max_context_len}, max_num_blocks {max_num_blocks}")
             if log_detailed_metrics:
                 logger.warning(f"VLLM_HPU_STEP_CPU_FALLBACK: {cpu_fallback_local_metric.stats()}")
-            if can_collect_recipe_cache_metrics:
-                logger.warning(f"VLLM_HPU_STEP_RECIPE_CACHE: {recipe_cache_local_metric.stats()}")
             
             return output
 
