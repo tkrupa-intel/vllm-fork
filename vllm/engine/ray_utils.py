@@ -1,6 +1,6 @@
 import pickle
 from typing import List, Optional, Tuple
-
+import os
 from vllm.config import ParallelConfig
 from vllm.logger import init_logger
 from vllm.utils import get_ip, is_hip, is_hpu, set_cuda_visible_devices
@@ -100,7 +100,8 @@ def initialize_ray_cluster(
                  ignore_reinit_error=True,
                  num_gpus=parallel_config.world_size)
     else:
-        ray.init(address=ray_address, ignore_reinit_error=True)
+        ray.init(address=ray_address, ignore_reinit_error=True,
+                 log_to_driver=not os.environ.get('VLLM_RAY_DISABLE_LOG_TO_DRIVER', '0') != '0')
     ray_accel_name = "HPU" if is_hpu() else "GPU"
     
     if parallel_config.placement_group:

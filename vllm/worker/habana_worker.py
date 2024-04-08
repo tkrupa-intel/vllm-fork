@@ -73,8 +73,6 @@ class HabanaWorker:
         if self.device_config.device.type == "hpu":
             self.device = torch.device("hpu")
             torch.hpu.set_device(self.device)
-
-            #_check_if_hpu_supports_dtype(self.model_config.dtype)
             self.init_hpu_memory = torch.hpu.mem_get_info()[0]
         else:
             raise RuntimeError(
@@ -139,7 +137,7 @@ class HabanaWorker:
         self.cache_config = cache_config
         self.cache_engine = CacheEngine(self.cache_config, self.model_config,
                                         self.parallel_config)
-        self.hpu_cache = self.cache_engine.hpu_cache
+        self.hpu_cache = self.cache_engine.gpu_cache
         self.model_runner.set_block_size(self.cache_engine.block_size)
 
     def warm_up_model(self) -> None:
