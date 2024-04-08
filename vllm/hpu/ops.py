@@ -113,10 +113,5 @@ def apply_rope(
     return q_embed, k_embed
 
 
-def rotary_embedding(positions, query, key, head_size, cos_sin_cache, is_neox_style):
-    # FIXME: the below code is unused legacy code not meant to be used. Use FusedRoPE
-    #  on HPU and delete this once coverage is verified
-    raise NotImplementedError
-
 def awq_gemm(*args):
     raise NotImplementedError
