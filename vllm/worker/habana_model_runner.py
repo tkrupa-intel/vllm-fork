@@ -72,7 +72,7 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-        self.graph_runner_class = FakeHPUGraphRunner
+        self.graph_runner_class = HPUGraphRunner
         self.graph_runners: Dict[int, self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
@@ -753,9 +753,9 @@ class HabanaModelRunner:
 
         # Prepare dummy inputs. These will be reused for all batch sizes.
         max_batch_size = max(_BATCH_SIZES_TO_CAPTURE)
-        input_tokens = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
-        input_positions = torch.zeros(max_batch_size, dtype=torch.long).to('hpu')
-        slot_mapping = torch.zeros(max_batch_size, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
+        input_tokens = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
+        input_positions = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu')
+        slot_mapping = torch.zeros(max_batch_size, 1, dtype=torch.long).to('hpu') # TODO(kzawora): when using torch.empty, following occurs: RuntimeError: Error when trying to cast Long to Int, Input values range [0, 139632108750000] exceeds Int range [-2147483648, 2147483647]
         slot_mapping.fill_(_PAD_SLOT_ID)
         context_lens = torch.ones(max_batch_size, dtype=torch.int32).to('hpu')
         block_tables = torch.from_numpy(self.graph_block_tables).to('hpu')
@@ -942,6 +942,86 @@ class FakeHPUGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+class HPUGraphRunner:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.graph = None
+        self.input_buffers: Dict[str, torch.Tensor] = {}
+        self.output_buffers: Dict[str, torch.Tensor] = {}
+
+    def capture(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> None:
+        assert self.graph is None
+        # Run the model once without capturing the graph.
+        # This is to make sure that the captured graph does not include the
+        # kernel launches for initial benchmarking (e.g., Triton autotune).
+        self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+        )
+        htorch.hpu.synchronize()
+
+        # Capture the graph.
+        # NOTE(woosuk): Python 3.8 does not support multi-line with statements.
+        # https://stackoverflow.com/questions/31039022/python-multi-line-with-statement
+        self.graph = htorch.hpu.HPUGraph()
+        with htorch.hpu.graph(self.graph):  # noqa: SIM117
+            hidden_states = self.model(
+                input_ids,
+                positions,
+                kv_caches,
+                attn_metadata,
+            )
+        torch.hpu.synchronize()
+
+        # Save the input and output buffers.
+        self.input_buffers = {
+            "input_ids": input_ids,
+            "positions": positions,
+            "kv_caches": kv_caches,
+            "slot_mapping": attn_metadata.slot_mapping,
+            "context_lens": attn_metadata.context_lens,
+            "block_tables": attn_metadata.block_tables,
+        }
+        self.output_buffers = {"hidden_states": hidden_states}
+        return
+
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        # KV caches are fixed tensors, so we don't need to copy them.
+        del kv_caches
+
+        # Copy the input tensors to the input buffers.
+        self.input_buffers["input_ids"].copy_(input_ids, non_blocking=True)
+        self.input_buffers["positions"].copy_(positions, non_blocking=True)
+        self.input_buffers["slot_mapping"].copy_(attn_metadata.slot_mapping,
+                                                 non_blocking=True)
+        self.input_buffers["context_lens"].copy_(attn_metadata.context_lens,
+                                                 non_blocking=True)
+        self.input_buffers["block_tables"].copy_(attn_metadata.block_tables,
+                                                 non_blocking=True)
+        # Run the graph.
+        self.graph.replay()
+
+        # Return the output tensor.
+        return self.output_buffers["hidden_states"]
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
+    
 @contextlib.contextmanager
 def _maybe_cupy_nccl():
     if cupy_utils.is_initialized() and not custom_all_reduce.is_initialized():
