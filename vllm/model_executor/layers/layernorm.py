@@ -10,11 +10,12 @@ if is_hpu():
 else:
     from vllm._C import ops
 
-try:
-    from habana_frameworks.torch.hpex.normalization import FusedRMSNorm as FusedRMSNorm
-except ImportError:
-    print("Not using HPU fused kernel for RMSNorm")
-    FusedRMSNorm = None
+if is_hpu():
+    try:
+        from habana_frameworks.torch.hpex.normalization import FusedRMSNorm as FusedRMSNorm
+    except ImportError:
+        print("Not using HPU fused kernel for RMSNorm")
+        FusedRMSNorm = None
 
 class RMSNorm(nn.Module):
     """Root mean square normalization.
@@ -76,7 +77,6 @@ class RMSNorm(nn.Module):
             orig_dtype = x.dtype
             x = FusedRMSNorm.apply(x.float(), self.weight.float(), self.variance_epsilon)
             return x.to(orig_dtype)
-        raise NotImplementedError("RMSNorm is required for HPU.")
         out = torch.empty_like(x)
         ops.rms_norm(
             out,
