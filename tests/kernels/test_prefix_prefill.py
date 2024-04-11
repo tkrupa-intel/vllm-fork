@@ -3,10 +3,15 @@ import time
 
 import pytest
 import torch
-from xformers import ops as xops
-from xformers.ops.fmha.attn_bias import BlockDiagonalCausalFromBottomRightMask
 
 from vllm.attention.ops.prefix_prefill import context_attention_fwd
+from vllm.utils import is_hpu
+if is_hpu():
+    from vllm.hpu import xops
+    from vllm.hpu.attn_bias import BlockDiagonalCausalFromBottomRightMask
+else:
+    from xformers import ops as xops
+    from xformers.ops.fmha.attn_bias import BlockDiagonalCausalFromBottomRightMask
 
 NUM_HEADS = [64]
 NUM_QUERIES_PER_KV = [1, 8, 64]

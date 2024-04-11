@@ -4,7 +4,11 @@ from typing import Tuple
 import pytest
 import torch
 
-from vllm._C import cache_ops
+from vllm.utils import is_hpu
+if is_hpu():
+    from vllm.hpu import cache_ops
+else:
+    from vllm._C import cache_ops
 
 COPYING_DIRECTION = [('cuda', 'cpu'), ('cuda', 'cuda'), ('cpu', 'cuda')]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
@@ -50,6 +54,10 @@ def test_copy_blocks(
     kv_cache_dtype: str,
     device: str,
 ) -> None:
+    if is_hpu():
+        if kv_cache_dtype != "auto":
+            pytest.skip("Only auto kv_cache_dtype supported on HPU")
+
     random.seed(seed)
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():

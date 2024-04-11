@@ -351,7 +351,7 @@ def test_multi_query_kv_attention(
     device: str,
 ) -> None:
     if is_hpu():
-        pytest.xfail("memory_efficient_attention_forward() works incorrectly on HPU")
+        pytest.skip("memory_efficient_attention_forward() works incorrectly on HPU")
 
     random.seed(seed)
     torch.random.manual_seed(seed)
