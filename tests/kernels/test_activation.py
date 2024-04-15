@@ -6,6 +6,10 @@ from allclose_default import get_default_atol, get_default_rtol
 
 from vllm.model_executor.layers.activation import (FastGELU, GeluAndMul,
                                                    NewGELU, SiluAndMul)
+from vllm.utils import is_hpu
+if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 83, 2048]  # Arbitrary values for testing
@@ -31,6 +35,10 @@ def test_act_and_mul(
     seed: int,
     device: str,
 ) -> None:
+
+    if is_hpu() and activation != "silu":
+        pytest.skip("Only SiluAndMul supported on HPU.")
+
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
@@ -64,6 +72,9 @@ def test_activation(
     seed: int,
     device: str,
 ) -> None:
+    if is_hpu():
+        pytest.skip("GELU not supported on HPU.")
+
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
