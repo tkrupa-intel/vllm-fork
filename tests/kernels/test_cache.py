@@ -6,6 +6,8 @@ import torch
 
 from vllm.utils import is_hpu
 if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
     from vllm.hpu import cache_ops
 else:
     from vllm._C import cache_ops
@@ -28,6 +30,11 @@ CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
 ]
 KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
+
+RESHAPE_AND_CACHE_MODES = ["prompt", "decode"]
+# This differentiation is only made in HPU path.
+if not is_hpu():
+    RESHAPE_AND_CACHE_MODES.pop("prompt")
 
 
 @pytest.mark.parametrize("num_mappings", NUM_MAPPINGS)
@@ -105,6 +112,7 @@ def test_copy_blocks(
         assert torch.allclose(value_cache, cloned_value_cache)
 
 
+@pytest.mark.parametrize("rc_mode", RESHAPE_AND_CACHE_MODES)
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -116,6 +124,7 @@ def test_copy_blocks(
 @torch.inference_mode()
 def test_reshape_and_cache(
     kv_cache_factory,
+    rc_mode: str,
     num_tokens: int,
     num_heads: int,
     head_size: int,
@@ -130,9 +139,16 @@ def test_reshape_and_cache(
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
     torch.set_default_device(device)
+
     # Create a random slot mapping.
-    num_slots = block_size * num_blocks
-    slot_mapping = random.sample(range(num_slots), num_tokens)
+    is_prompt = rc_mode == "prompt"
+    if is_prompt:
+        num_slots = block_size * num_blocks
+        slot_mapping = random.sample(range(num_slots), num_tokens)
+    else:
+        blocks = random.sample(range(num_blocks), num_tokens)
+        offsets = random.choices(range(block_size), k=num_tokens)
+        slot_mapping = [block * block_size + offset for block, offset in zip(blocks, offsets)]
     slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
 
     qkv = torch.randn(num_tokens, 3, num_heads, head_size, dtype=dtype)
@@ -149,20 +165,43 @@ def test_reshape_and_cache(
     cloned_value_cache = value_cache.clone()
 
     # Call the reshape_and_cache kernel.
-    cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
-                                slot_mapping, "auto")
+    if is_hpu():
+        cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
+                                    slot_mapping.view((1, -1)), "auto", is_prompt)
+    else:
+        cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
+                                    slot_mapping, "auto")
 
     # Run the reference implementation.
-    reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0, :].shape)
-    block_indicies = torch.div(slot_mapping, block_size, rounding_mode="floor")
-    block_indicies = block_indicies.cpu().tolist()
+    if is_hpu():
+        reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0].shape)
+    else:
+        reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0, :].shape)
+    block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    block_indices = block_indices.cpu().tolist()
     block_offsets = slot_mapping % block_size
     block_offsets = block_offsets.cpu().tolist()
-    for i in range(num_tokens):
-        block_idx = block_indicies[i]
-        block_offset = block_offsets[i]
-        cloned_key_cache[block_idx, :, :, block_offset, :] = reshaped_key[i]
-        cloned_value_cache[block_idx, :, :, block_offset] = value[i]
+    if is_prompt:
+        for i in range(0, num_tokens, block_size):
+            for j in range(block_size):
+                block_idx = block_indices[i]
+                if i + j >= num_tokens:
+                    cached_key = 0
+                    cached_val = 0
+                else:
+                    cached_key = key[i + j, :, :]
+                    cached_val = value[i + j, :, :]
+                cloned_key_cache[block_idx, :, :, j] = cached_key
+                cloned_value_cache[block_idx, :, :, j] = cached_val
+    else:
+        for i in range(num_tokens):
+            block_idx = block_indices[i]
+            block_offset = block_offsets[i]
+            if is_hpu():
+                cloned_key_cache[block_idx, :, :, block_offset] = reshaped_key[i]
+            else:
+                cloned_key_cache[block_idx, :, :, block_offset, :] = reshaped_key[i]
+            cloned_value_cache[block_idx, :, :, block_offset] = value[i]
 
     assert torch.allclose(key_cache, cloned_key_cache)
     assert torch.allclose(value_cache, cloned_value_cache)
