@@ -29,10 +29,11 @@ def initialize_cache(data, indices, cache):
 
 
 def update_cache(data, indices, offsets, cache):
-    prev = cache.index_select(0, indices)
-    idx = offsets.view(-1, 1, 1, 1).expand(-1, data.size(1), data.size(2), -1)
-    prev.scatter_(-1, idx, data.unsqueeze(-1))
-    cache.index_copy_(0, indices, prev)
+    i = indices.view(-1, 1, 1, 1)
+    j = torch.arange(data.size(1), dtype=indices.dtype).reshape(1, data.size(1), 1, 1)
+    k = torch.arange(data.size(2), dtype=indices.dtype).reshape(1, 1, data.size(2), 1)
+    m  = offsets.view(-1, 1, 1, 1)
+    cache[i, j, k, m] = data.unsqueeze(-1)
 
 
 def reshape_and_cache(key, value, key_cache, value_cache, slot_mapping, dtype, is_prompt):
