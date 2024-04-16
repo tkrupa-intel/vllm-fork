@@ -841,7 +841,6 @@ class HabanaModelRunner:
                 )
                 self.graph_runners[(batch_size, block_count)] = graph_runner
                 capture_end = time.time()
-                captured_block_counts.append(block_count)
                 logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}]  Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
 
         end_time = time.perf_counter()
