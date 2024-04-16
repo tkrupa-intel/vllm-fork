@@ -790,7 +790,6 @@ class HabanaModelRunner:
         with custom_all_reduce.capture():
             # NOTE: Capturing the largest batch size first may help reduce the
             # memory usage of CUDA graph.
-            captured_block_counts = []
             for idx, (batch_size, max_context_len) in enumerate(itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_MAX_CONTEXT_LENS_TO_CAPTURE))): 
                 block_count = math.ceil(max_context_len / self.block_size)
                 # Skip capture of "out-of-bound" batch sizes and context lengths
@@ -800,6 +799,7 @@ class HabanaModelRunner:
                 if max_context_len > self.max_context_len_to_capture:
                     logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Nax context length out of bound.")
                     continue
+                captured_block_counts = [bc for (n, bc) in self.graph_runners if n == batch_size]
                 if block_count in captured_block_counts:
                     logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Block size already captured.")
                     continue
