@@ -80,7 +80,7 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-        self.graph_runner_class = FakeHPUGraphRunner
+        self.graph_runner_class = HPUGraphRunner
         self.graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
