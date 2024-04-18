@@ -2,6 +2,10 @@ import pytest
 import torch
 
 from vllm.model_executor.layers.layernorm import RMSNorm
+from vllm.utils import is_hpu
+if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
 
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [7, 83, 4096]  # Arbitrary values for testing
@@ -35,7 +39,7 @@ def test_rms_norm(
     layer = RMSNorm(hidden_size).to(dtype=dtype)
     layer.weight.data.normal_(mean=1.0, std=0.1)
     scale = 1 / (2 * hidden_size)
-    x = torch.randn(num_tokens, hidden_size, dtype=dtype)
+    x = torch.randn(1, num_tokens, hidden_size, dtype=dtype, device=device)
     x *= scale
     residual = torch.randn_like(x) * scale if add_residual else None
 
