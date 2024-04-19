@@ -20,7 +20,7 @@ else:
 FLOAT32_BYTES = torch.finfo(torch.float).bits // 8
 # This will change depending on the compute capability.
 # - 512 as a buffer
-MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512 if not is_hpu() else 512
+MAX_SEQ_LEN = get_max_shared_memory_bytes() // FLOAT32_BYTES - 512 if not is_hpu() else 128
 # There may not be enough gpu memory due to large NUM_BLOCKS.
 # Reduce NUM_BLOCKS when it happens.
 NUM_BLOCKS = 4321  # Arbitrary values for testing
