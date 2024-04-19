@@ -1,6 +1,7 @@
 import random
 from typing import Tuple
 
+import math
 import pytest
 import torch
 
@@ -30,11 +31,6 @@ CUDA_DEVICES = [
     f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
 ]
 KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
-
-RESHAPE_AND_CACHE_MODES = ["prompt", "decode"]
-# This differentiation is only made in HPU path.
-if not is_hpu():
-    RESHAPE_AND_CACHE_MODES.pop("prompt")
 
 
 @pytest.mark.parametrize("num_mappings", NUM_MAPPINGS)
@@ -112,7 +108,90 @@ def test_copy_blocks(
         assert torch.allclose(value_cache, cloned_value_cache)
 
 
-@pytest.mark.parametrize("rc_mode", RESHAPE_AND_CACHE_MODES)
+@pytest.mark.parametrize("num_tokens", NUM_TOKENS)
+@pytest.mark.parametrize("num_heads", NUM_HEADS)
+@pytest.mark.parametrize("head_size", HEAD_SIZES)
+@pytest.mark.parametrize("block_size", BLOCK_SIZES)
+@pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
+@pytest.mark.parametrize("dtype", DTYPES)
+@pytest.mark.parametrize("seed", SEEDS)
+@pytest.mark.parametrize("device", CUDA_DEVICES)
+@torch.inference_mode()
+def test_reshape_and_cache_prompt(
+    kv_cache_factory,
+    num_tokens: int,
+    num_heads: int,
+    head_size: int,
+    block_size: int,
+    num_blocks: int,
+    dtype: torch.dtype,
+    seed: int,
+    device: str,
+) -> None:
+    if not is_hpu():
+        pytest.skip("This case is HPU-specific.")
+
+    random.seed(seed)
+    torch.random.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    torch.set_default_device(device)
+
+    # Create a random slot mapping.
+    num_block_indices_to_generate = math.ceil(num_tokens / block_size)
+    block_indices_ = random.sample(range(num_blocks), num_block_indices_to_generate)
+    block_offsets_ = []
+    slot_mapping = []
+    for i in block_indices_:
+        for j in range(block_size):
+            slot_mapping.append(i * block_size + j)
+    slot_mapping = slot_mapping[:num_tokens]
+    slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
+
+    qkv = torch.randn(num_tokens, 3, num_heads, head_size, dtype=dtype)
+    _, key, value = qkv.unbind(dim=1)
+
+    # Create the KV caches.
+    key_caches, value_caches = kv_cache_factory(num_blocks, block_size, 1,
+                                                num_heads, head_size, dtype,
+                                                None, seed, device)
+    key_cache, value_cache = key_caches[0], value_caches[0]
+
+    # Clone the KV caches.
+    cloned_key_cache = key_cache.clone()
+    cloned_value_cache = value_cache.clone()
+
+    # Call the reshape_and_cache kernel.
+    cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
+                                slot_mapping.view((1, -1)), "auto", True)
+
+    # Run the reference implementation.
+    if is_hpu():
+        reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0].shape)
+    else:
+        reshaped_key = key.reshape(num_tokens, *key_cache[0, :, :, 0, :].shape)
+    block_indices = torch.div(slot_mapping, block_size, rounding_mode="floor")
+    block_indices = block_indices.cpu().tolist()
+    block_offsets = slot_mapping % block_size
+    block_offsets = block_offsets.cpu().tolist()
+    for i in range(0, num_tokens):
+        block_idx = block_indices[i]
+        block_offset = block_offsets[i]
+        cloned_key_cache[block_idx, :, :, block_offset] = key[i, :, :]
+        cloned_value_cache[block_idx, :, :, block_offset] = value[i, :, :]
+
+    # Note: only checking cache areas specified by the slot mapping because
+    # the implementation may initialize whole blocks even if some of the offsets of the block
+    # are not present in the slot mapping.
+    for i in range(0, num_tokens):
+        block_idx = block_indices[i]
+        block_offset = block_offsets[i]
+        assert torch.allclose(key_cache[block_idx, :, :, block_offset],
+                              cloned_key_cache[block_idx, :, :, block_offset])
+        assert torch.allclose(value_cache[block_idx, :, :, block_offset],
+                              cloned_value_cache[block_idx, :, :, block_offset])
+
+
 @pytest.mark.parametrize("num_tokens", NUM_TOKENS)
 @pytest.mark.parametrize("num_heads", NUM_HEADS)
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
@@ -124,7 +203,6 @@ def test_copy_blocks(
 @torch.inference_mode()
 def test_reshape_and_cache(
     kv_cache_factory,
-    rc_mode: str,
     num_tokens: int,
     num_heads: int,
     head_size: int,
@@ -141,14 +219,9 @@ def test_reshape_and_cache(
     torch.set_default_device(device)
 
     # Create a random slot mapping.
-    is_prompt = rc_mode == "prompt"
-    if is_prompt:
-        num_slots = block_size * num_blocks
-        slot_mapping = random.sample(range(num_slots), num_tokens)
-    else:
-        blocks = random.sample(range(num_blocks), num_tokens)
-        offsets = random.choices(range(block_size), k=num_tokens)
-        slot_mapping = [block * block_size + offset for block, offset in zip(blocks, offsets)]
+    blocks = random.sample(range(num_blocks), num_tokens)
+    offsets = random.choices(range(block_size), k=num_tokens)
+    slot_mapping = [block * block_size + offset for block, offset in zip(blocks, offsets)]
     slot_mapping = torch.tensor(slot_mapping, dtype=torch.long)
 
     qkv = torch.randn(num_tokens, 3, num_heads, head_size, dtype=dtype)
@@ -167,7 +240,7 @@ def test_reshape_and_cache(
     # Call the reshape_and_cache kernel.
     if is_hpu():
         cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
-                                    slot_mapping.view((1, -1)), "auto", is_prompt)
+                                    slot_mapping.view((1, -1)), "auto", False)
     else:
         cache_ops.reshape_and_cache(key, value, key_cache, value_cache,
                                     slot_mapping, "auto")
@@ -181,27 +254,14 @@ def test_reshape_and_cache(
     block_indices = block_indices.cpu().tolist()
     block_offsets = slot_mapping % block_size
     block_offsets = block_offsets.cpu().tolist()
-    if is_prompt:
-        for i in range(0, num_tokens, block_size):
-            for j in range(block_size):
-                block_idx = block_indices[i]
-                if i + j >= num_tokens:
-                    cached_key = 0
-                    cached_val = 0
-                else:
-                    cached_key = key[i + j, :, :]
-                    cached_val = value[i + j, :, :]
-                cloned_key_cache[block_idx, :, :, j] = cached_key
-                cloned_value_cache[block_idx, :, :, j] = cached_val
-    else:
-        for i in range(num_tokens):
-            block_idx = block_indices[i]
-            block_offset = block_offsets[i]
-            if is_hpu():
-                cloned_key_cache[block_idx, :, :, block_offset] = reshaped_key[i]
-            else:
-                cloned_key_cache[block_idx, :, :, block_offset, :] = reshaped_key[i]
-            cloned_value_cache[block_idx, :, :, block_offset] = value[i]
+    for i in range(num_tokens):
+        block_idx = block_indices[i]
+        block_offset = block_offsets[i]
+        if is_hpu():
+            cloned_key_cache[block_idx, :, :, block_offset] = reshaped_key[i]
+        else:
+            cloned_key_cache[block_idx, :, :, block_offset, :] = reshaped_key[i]
+        cloned_value_cache[block_idx, :, :, block_offset] = value[i]
 
     assert torch.allclose(key_cache, cloned_key_cache)
     assert torch.allclose(value_cache, cloned_value_cache)
