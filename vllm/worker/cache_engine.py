@@ -64,11 +64,13 @@ class CacheEngine:
         kv_cache: List[torch.Tensor] = []
         for _ in range(self.num_layers):
             if device == 'hpu':
-                kv_layer = torch.zeros(kv_cache_shape,
+                key_cache = torch.zeros(kv_cache_shape,
                         dtype=self.dtype,
-                        pin_memory=pin_memory,
                         device=device)
-                htorch.core.mark_step()
+                value_cache = torch.zeros(kv_cache_shape,
+                        dtype=self.dtype,
+                        device=device)
+                kv_layer = (key_cache, value_cache)
                 kv_cache.append(kv_layer)
             else:
                 kv_layer = torch.empty(kv_cache_shape,
