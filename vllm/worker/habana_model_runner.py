@@ -6,6 +6,11 @@ import contextlib
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
+# for logging hpugraph capture
+import tqdm
+import pandas as pd
+import tabulate
+
 import math
 import itertools
 import numpy as np
@@ -37,17 +42,17 @@ logger = init_logger(__name__)
 
 _PAD_SLOT_ID = -1
 LORA_WARMUP_RANK = 8
-_BATCH_SIZE_ALIGNMENT = 8
-# Capture graphs for token size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
+_BATCH_SIZE_ALIGNMENT = 16
+# Capture graphs for token size 1, 2, 4, 8, 16, 32, 48, ..., 512.
 # NOTE: _get_graph_batch_size needs to be updated if this list is changed.
-_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [
+_BATCH_SIZES_TO_CAPTURE = [1, 2, 4, 8] + [
     _BATCH_SIZE_ALIGNMENT * i for i in range(1, 33)
 ]
 
-# Capture graphs for token size 1, 32, 64, 128, 256, 386 ... 4096
-_MAX_CONTEXT_LEN_ALIGNMENT = 128
-_MAX_CONTEXT_LENS_TO_CAPTURE = [1, 32, 64] + [
-    _MAX_CONTEXT_LEN_ALIGNMENT * i for i in range(1, 33)
+# Capture graphs for token size 1, 32, 64, 128, 256, 512, 768 ... 2048
+_MAX_CONTEXT_LEN_ALIGNMENT = 256
+_MAX_CONTEXT_LENS_TO_CAPTURE = [1, 32, 64, 128] + [
+    _MAX_CONTEXT_LEN_ALIGNMENT * i for i in range(1, 9)
 ]
 
 
@@ -80,7 +85,7 @@ class HabanaModelRunner:
         self.model = None
         self.block_size = None  # Set after initial profiling.
         self.lora_manager = None
-        self.graph_runner_class = HPUGraphRunner
+        self.graph_runner_class = FakeHPUGraphRunnerWithWarmup
         self.graph_runners: Dict[Tuple[int, int], self.graph_runner_class] = {}
 
         self.max_context_len_to_capture = (
@@ -649,6 +654,7 @@ class HabanaModelRunner:
         # Only perform sampling in the driver worker.
         if not sampling_metadata.perform_sampling:
             return None
+        
         # Sample the next token.
         output = self.model.sample(
             logits=logits,
@@ -755,11 +761,11 @@ class HabanaModelRunner:
         self.cupy_nccl_backend = cupy_utils.get_nccl_backend()
 
         assert not self.model_config.enforce_eager
-        logger.info("Capturing the model for CUDA graphs. This may lead to "
+        logger.info("Capturing the model for HPUGraphs. This may lead to "
                     "unexpected consequences if the model is not static. To "
                     "run the model in eager mode, set 'enforce_eager=True' or "
                     "use '--enforce-eager' in the CLI.")
-        logger.info("CUDA graphs can take additional 1~3 GiB memory per GPU. "
+        logger.info("HPUGraphs can take additional ~10 GiB memory per HPU. "
                     "If you are running out of memory, consider decreasing "
                     "`gpu_memory_utilization` or enforcing eager mode. "
                     "You can also reduce the `max_num_seqs` as needed "
@@ -790,20 +796,40 @@ class HabanaModelRunner:
         with custom_all_reduce.capture():
             # NOTE: Capturing the largest batch size first may help reduce the
             # memory usage of CUDA graph.
+            valid_combinations = []
+            total_combinations = len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)
+            import pandas as pd
+            df = pd.DataFrame(index=_BATCH_SIZES_TO_CAPTURE, columns=_MAX_CONTEXT_LENS_TO_CAPTURE)
             for idx, (batch_size, max_context_len) in enumerate(itertools.product(reversed(_BATCH_SIZES_TO_CAPTURE), reversed(_MAX_CONTEXT_LENS_TO_CAPTURE))): 
                 block_count = math.ceil(max_context_len / self.block_size)
                 # Skip capture of "out-of-bound" batch sizes and context lengths
                 if batch_size > self.scheduler_config.max_num_seqs:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Batch out of bound.")
+                    logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Batch out of bound.")
+                    df[max_context_len][batch_size] = 'batch OoB'
                     continue 
                 if max_context_len > self.max_context_len_to_capture:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Nax context length out of bound.")
+                    logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Nax context length out of bound.")
+                    df[max_context_len][batch_size] = 'ctx OoB'
                     continue
-                captured_block_counts = [bc for (n, bc) in self.graph_runners if n == batch_size]
+                block_count = math.ceil(max_context_len / self.block_size)
+                captured_block_counts = [math.ceil(cl / self.block_size) for (n, cl) in valid_combinations if n == batch_size]
                 if block_count in captured_block_counts:
-                    logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Skipping capture of GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Block size already captured.")
+                    logger.debug(f"[{idx}/{total_combinations}] Skipping capture for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Reason: Block size already captured.")
+                    df[max_context_len][batch_size] = 'redundant'
                     continue
-                
+                logger.debug(f"[{idx}/{total_combinations}] Will capture for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}. Constraints met.")
+                df[max_context_len][batch_size] = 'VALID'
+                valid_combinations.append((batch_size, max_context_len))
+
+            total_valid_hpugraphs = len(valid_combinations)
+            logger.info(f"Starting capture {total_valid_hpugraphs} valid HPUGraphs. Skipping capture of {total_combinations-total_valid_hpugraphs}/{total_combinations} graphs due to batch/context constraints.")
+            logger.info(f"Capture summary (row: batch_size; col: max_context_len):")
+            logger.info(tabulate.tabulate(df, tablefmt='mixed_outline', headers='keys', showindex="always"))
+
+            graph_runner_name = self.graph_runner_class.__name__
+            pbar = tqdm.tqdm(valid_combinations)
+            for idx, (batch_size, max_context_len) in enumerate(pbar): 
+                block_count = math.ceil(max_context_len / self.block_size)
                 # Create dummy attn_metadata.
                 attn_metadata = self.attn_backend.make_metadata(
                     is_prompt=False,
@@ -829,9 +855,10 @@ class HabanaModelRunner:
                         [0] * batch_size,
                     )
                     self.set_active_loras(set(), lora_mapping)
-                
                 graph_runner = self.graph_runner_class(self.model)
-                logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}] Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}...")
+                desc = f'Capturing {graph_runner_name} for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}'
+                pbar.set_description(desc)
+                logger.debug(f"[{idx}/{total_valid_hpugraphs}] {desc}...")
                 capture_start = time.time()
                 graph_runner.capture(
                     input_tokens[:batch_size],
@@ -841,7 +868,7 @@ class HabanaModelRunner:
                 )
                 self.graph_runners[(batch_size, block_count)] = graph_runner
                 capture_end = time.time()
-                logger.info(f"[{idx}/{len(_BATCH_SIZES_TO_CAPTURE)*len(_MAX_CONTEXT_LENS_TO_CAPTURE)}]  Capturing GraphRunner for batch {batch_size}, max_context_len {max_context_len}, block_count {block_count}... done in {capture_end-capture_start:.2f} seconds!")
+                logger.debug(f"[{idx}/{total_valid_hpugraphs}] {desc}... done in {capture_end-capture_start:.2f} seconds!")
 
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
@@ -892,6 +919,42 @@ class FakeHPUGraphRunner:
     def __call__(self, *args, **kwargs):
         return self.forward(*args, **kwargs)
 
+class FakeHPUGraphRunnerWithWarmup:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+
+    def capture(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> None:
+        out = self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+        )
+        return
+    
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        attn_metadata: AttentionMetadata,
+    ) -> torch.Tensor:
+        return self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            attn_metadata,
+        )
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 class HPUGraphRunner:
 
     def __init__(self, model: nn.Module):
@@ -991,6 +1054,8 @@ def _get_graph_batch_size(batch_size: int) -> int:
         return batch_size
     elif batch_size <= 4:
         return 4
+    elif batch_size <= 8:
+        return 4
     else:
         return ((batch_size + _BATCH_SIZE_ALIGNMENT - 1) //
                 _BATCH_SIZE_ALIGNMENT * _BATCH_SIZE_ALIGNMENT)
@@ -1006,6 +1071,8 @@ def _get_graph_max_context_len(max_context_len: int) -> int:
         return 32
     elif max_context_len <= 64:
         return 64
+    elif max_context_len <= 128:
+        return 128
     else:
         return ((max_context_len + _MAX_CONTEXT_LEN_ALIGNMENT - 1) //
                 _MAX_CONTEXT_LEN_ALIGNMENT * _MAX_CONTEXT_LEN_ALIGNMENT)
