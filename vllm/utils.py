@@ -393,8 +393,8 @@ class HabanaMemoryProfiler:
 
     def current_memory_usage(self) -> float:
         # Return the memory usage in bytes.
-        torch.hpu.reset_peak_memory_stats()
-        mem = torch.hpu.max_memory_allocated()
+        free_hpu_memory, total_hpu_memory = torch.hpu.mem_get_info()
+        mem = total_hpu_memory - free_hpu_memory
         return mem
 
     def __enter__(self):
