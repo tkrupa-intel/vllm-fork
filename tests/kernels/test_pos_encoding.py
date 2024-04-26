@@ -6,6 +6,10 @@ import torch
 from allclose_default import get_default_atol, get_default_rtol
 
 from vllm.model_executor.layers.rotary_embedding import get_rope
+from vllm.utils import is_hpu
+if is_hpu():
+    import habana_frameworks.torch.core as htcore
+    import habana_frameworks.torch.gpu_migration
 
 IS_NEOX_STYLE = [True, False]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
@@ -43,6 +47,9 @@ def test_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
+    if is_hpu() and not is_neox_style:
+        pytest.skip("gptj style rotation not currently supported on HPU.")
+
     if rotary_dim is None:
         rotary_dim = head_size
     torch.random.manual_seed(seed)
@@ -58,12 +65,13 @@ def test_rotary_embedding(
     query = torch.randn(batch_size,
                         seq_len,
                         num_heads * head_size,
-                        dtype=dtype)
+                        dtype=dtype,
+                        device=device)
     key = torch.randn_like(query)
 
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
-    ref_query, ref_key = rope._forward(positions, query, key)
+    ref_query, ref_key = rope._forward(positions, query.cpu(), key.cpu())
     out_query, out_key = rope.forward(positions, query, key)
     # Compare the results.
     assert torch.allclose(out_query,
@@ -99,6 +107,9 @@ def test_batched_rotary_embedding(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
+    if is_hpu():
+        pytest.skip("Rope scaling not currently supported on HPU.")
+
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
@@ -161,6 +172,9 @@ def test_batched_rotary_embedding_multi_lora(
     max_position: int = 8192,
     base: int = 10000,
 ) -> None:
+    if is_hpu():
+        pytest.skip("Rope scaling not currently supported on HPU.")
+
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
