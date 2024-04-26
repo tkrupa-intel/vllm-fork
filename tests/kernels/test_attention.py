@@ -7,8 +7,6 @@ from allclose_default import get_default_atol, get_default_rtol
 
 from vllm.utils import get_max_shared_memory_bytes, is_hip, is_hpu
 if is_hpu():
-    import habana_frameworks.torch.core as htcore
-    import habana_frameworks.torch.gpu_migration
     from vllm.hpu import ops, cache_ops
     from vllm.hpu import xops
     from vllm.hpu.attn_bias import BlockDiagonalCausalMask
@@ -41,9 +39,12 @@ BLOCK_SIZES = [16, 32]
 USE_ALIBI = [False, True]
 KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
 SEEDS = [0]
-CUDA_DEVICES = [
-    f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
-]
+if is_hpu():
+    DEVICES = ["hpu"]
+else:
+    DEVICES = [
+        f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
+    ]
 
 
 def ref_masked_attention(
@@ -129,7 +130,7 @@ def ref_single_query_cached_kv_attention(
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("kv_cache_dtype", KV_CACHE_DTYPE)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 def test_paged_attention(
     kv_cache_factory,
     version: str,
@@ -155,6 +156,8 @@ def test_paged_attention(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     scale = float(1.0 / (head_size**0.5))
     num_query_heads, num_kv_heads = num_heads
@@ -340,7 +343,7 @@ def ref_multi_query_kv_attention(
 @pytest.mark.parametrize("head_size", HEAD_SIZES)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_multi_query_kv_attention(
     num_seqs: int,
@@ -357,6 +360,8 @@ def test_multi_query_kv_attention(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     # MAX_SEQ_LEN sometimes causes OOM in the reference implementation.
     # As the xformers library is already tested with its own tests, we can use

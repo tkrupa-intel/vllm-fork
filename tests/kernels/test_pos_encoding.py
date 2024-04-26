@@ -7,9 +7,6 @@ from allclose_default import get_default_atol, get_default_rtol
 
 from vllm.model_executor.layers.rotary_embedding import get_rope
 from vllm.utils import is_hpu
-if is_hpu():
-    import habana_frameworks.torch.core as htcore
-    import habana_frameworks.torch.gpu_migration
 
 IS_NEOX_STYLE = [True, False]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
@@ -19,9 +16,12 @@ NUM_HEADS = [7, 17]  # Arbitrary values for testing
 BATCH_SIZES = [1, 5]  # Arbitrary values for testing
 SEQ_LENS = [11, 8192]  # Arbitrary values for testing
 SEEDS = [0]
-CUDA_DEVICES = [
-    f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
-]
+if is_hpu():
+    DEVICES = ["hpu"]
+else:
+    DEVICES = [
+        f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
+    ]
 
 
 @pytest.mark.parametrize("is_neox_style", IS_NEOX_STYLE)
@@ -32,7 +32,7 @@ CUDA_DEVICES = [
 @pytest.mark.parametrize("rotary_dim", ROTARY_DIMS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_rotary_embedding(
     is_neox_style: bool,
@@ -55,13 +55,15 @@ def test_rotary_embedding(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size
     rope = get_rope(head_size, rotary_dim, max_position, base, is_neox_style)
     rope = rope.to(dtype=dtype)
 
-    positions = torch.randint(0, max_position, (batch_size, seq_len))
+    positions = torch.randint(0, max_position, (batch_size, seq_len), device=device)
     query = torch.randn(batch_size,
                         seq_len,
                         num_heads * head_size,
@@ -71,7 +73,7 @@ def test_rotary_embedding(
 
     # NOTE(woosuk): The reference implementation should be executed first
     # because the custom kernel is in-place.
-    ref_query, ref_key = rope._forward(positions, query.cpu(), key.cpu())
+    ref_query, ref_key = rope._forward(positions.cpu(), query.cpu(), key.cpu())
     out_query, out_key = rope.forward(positions, query, key)
     # Compare the results.
     assert torch.allclose(out_query,
@@ -92,7 +94,7 @@ def test_rotary_embedding(
 @pytest.mark.parametrize("rotary_dim", ROTARY_DIMS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_batched_rotary_embedding(
     is_neox_style: bool,
@@ -113,6 +115,8 @@ def test_batched_rotary_embedding(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size
@@ -157,7 +161,7 @@ def test_batched_rotary_embedding(
 @pytest.mark.parametrize("rotary_dim", ROTARY_DIMS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_batched_rotary_embedding_multi_lora(
     is_neox_style: bool,
@@ -178,6 +182,8 @@ def test_batched_rotary_embedding_multi_lora(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     if rotary_dim is None:
         rotary_dim = head_size

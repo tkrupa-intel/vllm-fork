@@ -7,13 +7,10 @@ import torch
 
 from vllm.utils import is_hpu
 if is_hpu():
-    import habana_frameworks.torch.core as htcore
-    import habana_frameworks.torch.gpu_migration
     from vllm.hpu import cache_ops
 else:
     from vllm._C import cache_ops
 
-COPYING_DIRECTION = [('cuda', 'cpu'), ('cuda', 'cuda'), ('cpu', 'cuda')]
 DTYPES = [torch.half, torch.bfloat16, torch.float]
 NUM_TOKENS = [42]  # Arbitrary values for testing
 NUM_LAYERS = [1]  # Arbitrary values for testing
@@ -27,9 +24,14 @@ NUM_BLOCKS = [1024, 10000]
 
 NUM_MAPPINGS = [256]  # Arbitrary values for testing
 SEEDS = [0]
-CUDA_DEVICES = [
-    f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
-]
+if is_hpu():
+    COPYING_DIRECTION = [('hpu', 'cpu'), ('hpu', 'hpu'), ('cpu', 'hpu')]
+    DEVICES = ["hpu"]
+else:
+    COPYING_DIRECTION = [('cuda', 'cpu'), ('cuda', 'cuda'), ('cpu', 'cuda')]
+    DEVICES = [
+        f"cuda:{i}" for i in range(1 if torch.cuda.device_count() == 1 else 2)
+    ]
 KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
 
 
@@ -41,7 +43,7 @@ KV_CACHE_DTYPE = ["auto", "fp8_e5m2"]
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("kv_cache_dtype", KV_CACHE_DTYPE)
 @torch.inference_mode()
 def test_copy_blocks(
@@ -65,6 +67,8 @@ def test_copy_blocks(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
     # Generate random block mappings where each source block is mapped to two
     # destination blocks.
@@ -115,7 +119,7 @@ def test_copy_blocks(
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_reshape_and_cache_prompt(
     kv_cache_factory,
@@ -135,6 +139,8 @@ def test_reshape_and_cache_prompt(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
 
     # Create a random slot mapping.
@@ -199,7 +205,7 @@ def test_reshape_and_cache_prompt(
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_reshape_and_cache(
     kv_cache_factory,
@@ -216,6 +222,8 @@ def test_reshape_and_cache(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
     torch.set_default_device(device)
 
     # Create a random slot mapping.
@@ -275,7 +283,7 @@ def test_reshape_and_cache(
 @pytest.mark.parametrize("num_blocks", NUM_BLOCKS)
 @pytest.mark.parametrize("dtype", DTYPES)
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("device", CUDA_DEVICES)
+@pytest.mark.parametrize("device", DEVICES)
 @torch.inference_mode()
 def test_swap_blocks(
     kv_cache_factory,
@@ -293,9 +301,15 @@ def test_swap_blocks(
     torch.random.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+    elif is_hpu():
+        torch.hpu.manual_seed(seed)
 
-    src_device = device if direction[0] == "cuda" else 'cpu'
-    dst_device = device if direction[1] == "cuda" else 'cpu'
+    if is_hpu():
+        src_device = device if direction[0] == "hpu" else 'cpu'
+        dst_device = device if direction[1] == "hpu" else 'cpu'
+    else:
+        src_device = device if direction[0] == "cuda" else 'cpu'
+        dst_device = device if direction[1] == "cuda" else 'cpu'
 
     src_blocks = random.sample(range(num_blocks), num_mappings)
     # For the same device, mapping must not overlap
